@@ -1390,6 +1390,57 @@ function AIChatPanel({ data, setData, setView, setSelectedId, onClose }) {
   );
 }
 
+
+// ─── AUTH ────────────────────────────────────────────────────────────────────
+const ACCESS_PASSWORD = "OMsell4U";
+
+function LoginScreen({ onLogin }) {
+  const [pwd, setPwd] = useState("");
+  const [error, setError] = useState(false);
+
+  const attempt = () => {
+    if (pwd === ACCESS_PASSWORD) {
+      localStorage.setItem("openmove_auth", "1");
+      onLogin();
+    } else {
+      setError(true);
+      setTimeout(() => setError(false), 2000);
+    }
+  };
+
+  return (
+    <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+      background: "#07111f", fontFamily: "Outfit, sans-serif" }}>
+      <div style={{ background: "#0d1e38", border: "1px solid #1e3a60", borderRadius: 14,
+        padding: "40px 36px", width: 340, textAlign: "center" }}>
+        <div style={{ width: 48, height: 48, borderRadius: 12, background: "#2172f522",
+          border: "1.5px solid #2172f566", display: "flex", alignItems: "center",
+          justifyContent: "center", fontSize: 22, color: "#2172f5", fontWeight: 800,
+          margin: "0 auto 20px" }}>O</div>
+        <div style={{ fontSize: 20, fontWeight: 800, color: "#e2e8f0", marginBottom: 6 }}>OpenMove CRM</div>
+        <div style={{ fontSize: 13, color: "#7090b0", marginBottom: 28 }}>Inserisci la password per accedere</div>
+        <input
+          type="password"
+          placeholder="Password"
+          value={pwd}
+          onChange={(e) => setPwd(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && attempt()}
+          style={{ width: "100%", background: "#07111f", border: `1px solid ${error ? "#f87171" : "#1e3a60"}`,
+            borderRadius: 8, color: "#e2e8f0", padding: "10px 14px", fontSize: 14,
+            boxSizing: "border-box", outline: "none", marginBottom: 12, textAlign: "center" }}
+        />
+        {error && <div style={{ fontSize: 12, color: "#f87171", marginBottom: 10 }}>Password errata</div>}
+        <button onClick={attempt}
+          style={{ width: "100%", background: "#2172f5", color: "#fff", border: "none",
+            borderRadius: 8, padding: "10px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+          Accedi
+        </button>
+        <div style={{ fontSize: 11, color: "#7090b044", marginTop: 20 }}>Intellera · Accenture Group</div>
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 function OpenMoveCRM() {
   const [data, setData] = useState(null);
@@ -1485,6 +1536,8 @@ function OpenMoveCRM() {
     reader.readAsText(file);
   };
 
+  const [authed, setAuthed] = useState(() => localStorage.getItem("openmove_auth") === "1");
+  if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />;
   if (loading) {
     return (
       <div style={{ background: T.bg, height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Outfit, sans-serif" }}>
