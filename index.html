@@ -1411,8 +1411,8 @@ function OpenMoveCRM() {
   useEffect(() => {
     const load = async () => {
       try {
-        const r = await window.storage.get("openmove_crm_local");
-        setData(r?.value ? JSON.parse(r.value) : INIT);
+        const raw = localStorage.getItem("openmove_crm_local");
+        setData(raw ? JSON.parse(raw) : INIT);
       } catch {
         setData(INIT);
       }
@@ -1425,7 +1425,7 @@ function OpenMoveCRM() {
   useEffect(() => {
     if (!data) return;
     // local backup always
-    window.storage.set("openmove_crm_local", JSON.stringify(data)).catch(() => {});
+    try { localStorage.setItem("openmove_crm_local", JSON.stringify(data)); } catch {}
     // debounced Drive save
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     setSyncStatus("saving");
