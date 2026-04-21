@@ -1,0 +1,1519 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenMove CRM</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #07111f; }
+    #root { height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+
+
+const STAGES = [
+  { id: "prospect",    label: "Prospect",       color: "#7c8db5" },
+  { id: "contact",     label: "Primo Contatto", color: "#60a5fa" },
+  { id: "demo",        label: "Demo / Pitch",   color: "#a78bfa" },
+  { id: "proposal",    label: "Proposta",       color: "#fb923c" },
+  { id: "negotiation", label: "Trattativa",     color: "#f87171" },
+  { id: "won",         label: "Vinto ✓",        color: "#34d399" },
+  { id: "lost",        label: "Perso",          color: "#64748b" },
+];
+
+const PRODUCTS = ["MaaS Platform", "DRT", "ABT", "Google Maps Ticketing", "Analytics & BI", "Altro"];
+const PROD_COLOR = {
+  "MaaS Platform": "#60a5fa",
+  "DRT": "#a78bfa",
+  "ABT": "#34d399",
+  "Google Maps Ticketing": "#fb923c",
+  "Analytics & BI": "#f87171",
+  "Altro": "#7090b0",
+};
+const ENTITY_TYPES = ["Comune", "Città Metropolitana", "Regione", "Operatore TPL", "Consorzio", "Altro"];
+const PRIORITIES = ["Alta", "Media", "Bassa"];
+const PRI_COLOR = { Alta: "#f87171", Media: "#fb923c", Bassa: "#34d399" };
+const ACTIVITY_TYPES = ["Email", "Chiamata", "Riunione", "Demo", "Proposta", "Nota interna"];
+const ACTIVITY_ICON = { Email: "✉", Chiamata: "☏", Riunione: "◉", Demo: "▶", Proposta: "◆", "Nota interna": "✎" };
+const REGIONS = ["Abruzzo","Basilicata","Calabria","Campania","Emilia-Romagna","Friuli-Venezia Giulia","Lazio","Liguria","Lombardia","Marche","Molise","Piemonte","Puglia","Sardegna","Sicilia","Toscana","Trentino-Alto Adige","Umbria","Valle d'Aosta","Veneto","Altro"];
+
+const INIT = { accounts: [] };
+
+const DRIVE_URL = "https://script.google.com/macros/s/AKfycbyclBjURR1GXPhrRtswuyqtrnfGUioAoKxqAt6OI9HCtSoLBkjqyg4lnEeIFR3w2PdE/exec";
+const DRIVE_TOKEN = "igdpiugxiusg232GJGS2JG2S82jgsj2";
+
+const parseDMY = (s) => {
+  if (!s || typeof s !== "string") return null;
+  // Accept already-ISO dates (from AI)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const [d, m, y] = s.split("/");
+  if (!d || !m || !y || y.length !== 4) return null;
+  const iso = `${y}-${m.padStart(2,"0")}-${d.padStart(2,"0")}`;
+  return isNaN(new Date(iso).getTime()) ? null : iso;
+};
+const toDisplayInput = (iso) => {
+  if (!iso || typeof iso !== "string") return "";
+  const [y, m, d] = iso.split("-");
+  if (!y || !m || !d) return iso;
+  return `${d}/${m}/${y}`;
+};
+const fmtCur = (v) =>
+  new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v || 0);
+const fmtDate = (d) =>
+  d ? new Date(d + "T12:00:00").toLocaleDateString("it-IT", { day: "numeric", month: "short", year: "numeric" }) : "—";
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+const stageOf = (id) => STAGES.find((s) => s.id === id) || STAGES[0];
+
+// ─── THEME ──────────────────────────────────────────────────────────────────
+const T = {
+  bg: "#07111f",
+  surface: "#0d1e38",
+  surface2: "#132849",
+  surface3: "#1a3560",
+  accent: "#2172f5",
+  accentHover: "#3b87ff",
+  text: "#e2e8f0",
+  muted: "#7090b0",
+  border: "#1e3a60",
+  win: "#10b981",
+  danger: "#ef4444",
+};
+
+// ─── SHARED STYLES ───────────────────────────────────────────────────────────
+const IS = {
+  input: {
+    width: "100%", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 8,
+    color: T.text, padding: "8px 12px", fontSize: 14, boxSizing: "border-box", outline: "none",
+  },
+  textarea: {
+    width: "100%", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 8,
+    color: T.text, padding: "8px 12px", fontSize: 14, boxSizing: "border-box", outline: "none",
+    minHeight: 80, resize: "vertical",
+  },
+  select: {
+    background: T.bg, border: `1px solid ${T.border}`, borderRadius: 8,
+    color: T.text, padding: "8px 12px", fontSize: 14, cursor: "pointer", outline: "none",
+  },
+  btnPrimary: {
+    background: T.accent, color: "#fff", border: "none", borderRadius: 8,
+    padding: "9px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+  },
+  btnSecondary: {
+    background: T.surface2, color: T.text, border: `1px solid ${T.border}`, borderRadius: 8,
+    padding: "9px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+  },
+};
+
+// ─── BADGES ──────────────────────────────────────────────────────────────────
+function StageBadge({ id, small }) {
+  const s = stageOf(id);
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", padding: small ? "2px 8px" : "3px 10px",
+      borderRadius: 20, fontSize: small ? 11 : 12, fontWeight: 600, background: s.color + "22", color: s.color,
+      border: `1px solid ${s.color}44`, whiteSpace: "nowrap" }}>
+      {s.label}
+    </span>
+  );
+}
+
+function PriBadge({ pri }) {
+  const c = PRI_COLOR[pri] || T.muted;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px",
+      borderRadius: 20, fontSize: 11, fontWeight: 600, background: c + "22", color: c, border: `1px solid ${c}44` }}>
+      {pri === "Alta" ? "▲" : pri === "Media" ? "■" : "▼"} {pri}
+    </span>
+  );
+}
+
+function ProdBadge({ product }) {
+  const c = PROD_COLOR[product] || T.muted;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 8px",
+      borderRadius: 20, fontSize: 11, fontWeight: 600, background: c + "22", color: c, border: `1px solid ${c}44` }}>
+      {product}
+    </span>
+  );
+}
+
+// ─── FIELD WRAPPER ───────────────────────────────────────────────────────────
+function Field({ label, children, half }) {
+  return (
+    <div style={{ marginBottom: 14, flex: half ? "0 0 calc(50% - 6px)" : "0 0 100%" }}>
+      <label style={{ display: "block", color: T.muted, fontSize: 11, fontWeight: 600,
+        marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</label>
+      {children}
+    </div>
+  );
+}
+
+// ─── MODAL ───────────────────────────────────────────────────────────────────
+function Modal({ title, onClose, children, wide }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex",
+      alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 20 }}>
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 14,
+        padding: 28, width: "100%", maxWidth: wide ? 640 : 520, maxHeight: "90vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
+          <h3 style={{ color: T.text, fontSize: 16, fontWeight: 700, margin: 0 }}>{title}</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted,
+            fontSize: 22, cursor: "pointer", lineHeight: 1, padding: "0 4px" }}>×</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── NEW ACCOUNT MODAL ───────────────────────────────────────────────────────
+function NewAccountModal({ onSave, onClose }) {
+  const [f, setF] = useState({ name: "", type: "Comune", region: "Piemonte", priority: "Media", website: "", notes: "" });
+  const s = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  return (
+    <Modal title="Nuovo Prospect" onClose={onClose}>
+      <Field label="Nome Ente / Azienda">
+        <input style={IS.input} value={f.name} onChange={(e) => s("name", e.target.value)} placeholder="es. Comune di Milano" />
+      </Field>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+        <Field label="Tipologia" half>
+          <select style={{ ...IS.select, width: "100%" }} value={f.type} onChange={(e) => s("type", e.target.value)}>
+            {ENTITY_TYPES.map((t) => <option key={t}>{t}</option>)}
+          </select>
+        </Field>
+        <Field label="Regione" half>
+          <select style={{ ...IS.select, width: "100%" }} value={f.region} onChange={(e) => s("region", e.target.value)}>
+            {REGIONS.map((r) => <option key={r}>{r}</option>)}
+          </select>
+        </Field>
+        <Field label="Priorità" half>
+          <select style={{ ...IS.select, width: "100%" }} value={f.priority} onChange={(e) => s("priority", e.target.value)}>
+            {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
+          </select>
+        </Field>
+
+      </div>
+      <Field label="Website">
+        <input style={IS.input} value={f.website} onChange={(e) => s("website", e.target.value)} placeholder="comune.milano.it" />
+      </Field>
+      <Field label="Note e contesto">
+        <textarea style={IS.textarea} value={f.notes} onChange={(e) => s("notes", e.target.value)} placeholder="Contesto, referenti, opportunità, bandi..." />
+      </Field>
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
+        <button style={IS.btnSecondary} onClick={onClose}>Annulla</button>
+        <button style={IS.btnPrimary} onClick={() => { if (f.name.trim()) { onSave(f); onClose(); } }}>
+          Crea Prospect
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+
+// ─── EDIT ACCOUNT MODAL ──────────────────────────────────────────────────────
+function EditAccountModal({ account, onSave, onClose }) {
+  const [f, setF] = useState({
+    name: account.name || "",
+    type: account.type || "Comune",
+    region: account.region || "Piemonte",
+    priority: account.priority || "Media",
+    website: account.website || "",
+    notes: account.notes || "",
+  });
+  const s = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  return (
+    <Modal title="Modifica Prospect" onClose={onClose} wide>
+      <Field label="Nome Ente / Azienda">
+        <input style={IS.input} value={f.name} onChange={(e) => s("name", e.target.value)} />
+      </Field>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+        <Field label="Tipologia" half>
+          <select style={{ ...IS.select, width: "100%" }} value={f.type} onChange={(e) => s("type", e.target.value)}>
+            {ENTITY_TYPES.map((t) => <option key={t}>{t}</option>)}
+          </select>
+        </Field>
+        <Field label="Regione" half>
+          <select style={{ ...IS.select, width: "100%" }} value={f.region} onChange={(e) => s("region", e.target.value)}>
+            {REGIONS.map((r) => <option key={r}>{r}</option>)}
+          </select>
+        </Field>
+        <Field label="Priorità" half>
+          <select style={{ ...IS.select, width: "100%" }} value={f.priority} onChange={(e) => s("priority", e.target.value)}>
+            {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
+          </select>
+        </Field>
+        <Field label="Website" half>
+          <input style={IS.input} value={f.website} onChange={(e) => s("website", e.target.value)} placeholder="comune.milano.it" />
+        </Field>
+      </div>
+      <Field label="Note e contesto">
+        <textarea style={IS.textarea} value={f.notes} onChange={(e) => s("notes", e.target.value)} />
+      </Field>
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
+        <button style={IS.btnSecondary} onClick={onClose}>Annulla</button>
+        <button style={IS.btnPrimary} onClick={() => { if (f.name.trim()) { onSave(f); onClose(); } }}>Salva</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── NEW OPP MODAL ───────────────────────────────────────────────────────────
+function NewOppModal({ onSave, onClose }) {
+  const [f, setF] = useState({ title: "", product: "MaaS Platform", stage: "prospect", value: "", probability: 30, expectedClose: "", notes: "" });
+  const s = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  return (
+    <Modal title="Nuova Opportunità" onClose={onClose}>
+      <Field label="Titolo opportunità">
+        <input style={IS.input} value={f.title} onChange={(e) => s("title", e.target.value)} placeholder="Es. Gara MaaS 2025 – Lotto A" />
+      </Field>
+      <Field label="Prodotto">
+        <select style={{ ...IS.select, width: "100%" }} value={f.product} onChange={(e) => s("product", e.target.value)}>
+          {PRODUCTS.map((p) => <option key={p}>{p}</option>)}
+        </select>
+      </Field>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+        <Field label="Stage" half>
+          <select style={{ ...IS.select, width: "100%" }} value={f.stage} onChange={(e) => s("stage", e.target.value)}>
+            {STAGES.map((st) => <option key={st.id} value={st.id}>{st.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Probabilità %" half>
+          <input type="number" style={IS.input} value={f.probability} onChange={(e) => s("probability", Number(e.target.value))} min={0} max={100} />
+        </Field>
+        <Field label="Valore stimato (€)" half>
+          <input type="number" style={IS.input} value={f.value} onChange={(e) => s("value", e.target.value)} placeholder="150000" />
+        </Field>
+        <Field label="Chiusura prevista" half>
+          <input type="text" placeholder="gg/mm/aaaa" style={IS.input} value={f.expectedClose} onChange={(e) => s("expectedClose", e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Note">
+        <textarea style={IS.textarea} value={f.notes} onChange={(e) => s("notes", e.target.value)} />
+      </Field>
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
+        <button style={IS.btnSecondary} onClick={onClose}>Annulla</button>
+        <button style={IS.btnPrimary} onClick={() => {
+              const iso = parseDMY(f.expectedClose);
+              onSave({ ...f, expectedClose: iso || "" });
+              onClose();
+            }}>Aggiungi</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── EDIT OPP MODAL ──────────────────────────────────────────────────────────
+function EditOppModal({ opp, onSave, onClose }) {
+  const [f, setF] = useState({
+    title: opp.title || "",
+    product: opp.product,
+    stage: opp.stage,
+    value: opp.value,
+    probability: opp.probability,
+    expectedClose: opp.expectedClose ? toDisplayInput(opp.expectedClose) : "",
+    notes: opp.notes || "",
+  });
+  const s = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  return (
+    <Modal title="Modifica Opportunità" onClose={onClose} wide>
+      <Field label="Titolo opportunità">
+        <input style={IS.input} value={f.title} onChange={(e) => s("title", e.target.value)} placeholder="Es. Gara MaaS 2025 – Lotto A" />
+      </Field>
+      <Field label="Prodotto">
+        <select style={{ ...IS.select, width: "100%" }} value={f.product} onChange={(e) => s("product", e.target.value)}>
+          {PRODUCTS.map((p) => <option key={p}>{p}</option>)}
+        </select>
+      </Field>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+        <Field label="Stage" half>
+          <select style={{ ...IS.select, width: "100%" }} value={f.stage} onChange={(e) => s("stage", e.target.value)}>
+            {STAGES.map((st) => <option key={st.id} value={st.id}>{st.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Probabilità %" half>
+          <input type="number" style={IS.input} value={f.probability} onChange={(e) => s("probability", Number(e.target.value))} min={0} max={100} />
+        </Field>
+        <Field label="Valore stimato (€)" half>
+          <input type="number" style={IS.input} value={f.value} onChange={(e) => s("value", e.target.value)} />
+        </Field>
+        <Field label="Chiusura prevista" half>
+          <input type="text" placeholder="gg/mm/aaaa" style={IS.input} value={f.expectedClose} onChange={(e) => s("expectedClose", e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Note">
+        <textarea style={IS.textarea} value={f.notes} onChange={(e) => s("notes", e.target.value)} />
+      </Field>
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
+        <button style={IS.btnSecondary} onClick={onClose}>Annulla</button>
+        <button style={IS.btnPrimary} onClick={() => {
+          const iso = parseDMY(f.expectedClose);
+          onSave({ ...f, expectedClose: iso || opp.expectedClose || "", value: Number(f.value) || 0 });
+          onClose();
+        }}>Salva</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── EDIT CONTACT MODAL ──────────────────────────────────────────────────────
+function EditContactModal({ contact, onSave, onClose }) {
+  const [f, setF] = useState({ name: contact.name || "", role: contact.role || "", email: contact.email || "", phone: contact.phone || "" });
+  const s = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  return (
+    <Modal title="Modifica Contatto" onClose={onClose}>
+      <Field label="Nome e Cognome">
+        <input style={IS.input} value={f.name} onChange={(e) => s("name", e.target.value)} />
+      </Field>
+      <Field label="Ruolo">
+        <input style={IS.input} value={f.role} onChange={(e) => s("role", e.target.value)} placeholder="es. Assessore Mobilità" />
+      </Field>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+        <Field label="Email" half>
+          <input type="email" style={IS.input} value={f.email} onChange={(e) => s("email", e.target.value)} />
+        </Field>
+        <Field label="Telefono" half>
+          <input style={IS.input} value={f.phone} onChange={(e) => s("phone", e.target.value)} />
+        </Field>
+      </div>
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
+        <button style={IS.btnSecondary} onClick={onClose}>Annulla</button>
+        <button style={IS.btnPrimary} onClick={() => { if (f.name.trim()) { onSave(f); onClose(); } }}>Salva</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── NEW CONTACT MODAL ───────────────────────────────────────────────────────
+function NewContactModal({ onSave, onClose }) {
+  const [f, setF] = useState({ name: "", role: "", email: "", phone: "" });
+  const s = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  return (
+    <Modal title="Aggiungi Contatto" onClose={onClose}>
+      <Field label="Nome e Cognome">
+        <input style={IS.input} value={f.name} onChange={(e) => s("name", e.target.value)} />
+      </Field>
+      <Field label="Ruolo">
+        <input style={IS.input} value={f.role} onChange={(e) => s("role", e.target.value)} placeholder="es. Assessore Mobilità" />
+      </Field>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+        <Field label="Email" half>
+          <input type="email" style={IS.input} value={f.email} onChange={(e) => s("email", e.target.value)} />
+        </Field>
+        <Field label="Telefono" half>
+          <input style={IS.input} value={f.phone} onChange={(e) => s("phone", e.target.value)} />
+        </Field>
+      </div>
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
+        <button style={IS.btnSecondary} onClick={onClose}>Annulla</button>
+        <button style={IS.btnPrimary} onClick={() => { if (f.name.trim()) { onSave(f); onClose(); } }}>Aggiungi</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── EDIT ACTIVITY MODAL ─────────────────────────────────────────────────────
+function EditActivityModal({ activity, onSave, onClose }) {
+  const [f, setF] = useState({
+    type: activity.type || "Email",
+    date: toDisplayInput(activity.date),
+    note: activity.note || "",
+  });
+  const s = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  return (
+    <Modal title="Modifica Attività" onClose={onClose}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+        <Field label="Tipo" half>
+          <select style={{ ...IS.select, width: "100%" }} value={f.type} onChange={(e) => s("type", e.target.value)}>
+            {ACTIVITY_TYPES.map((t) => <option key={t}>{t}</option>)}
+          </select>
+        </Field>
+        <Field label="Data" half>
+          <input type="text" placeholder="gg/mm/aaaa" style={IS.input} value={f.date} onChange={(e) => s("date", e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Descrizione / Esiti">
+        <textarea style={{ ...IS.textarea, minHeight: 110 }} value={f.note} onChange={(e) => s("note", e.target.value)} />
+      </Field>
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
+        <button style={IS.btnSecondary} onClick={onClose}>Annulla</button>
+        <button style={IS.btnPrimary} onClick={() => {
+          if (f.note.trim()) {
+            onSave({ ...f, date: parseDMY(f.date) || activity.date });
+            onClose();
+          }
+        }}>Salva</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── LOG ACTIVITY MODAL ──────────────────────────────────────────────────────
+function LogActivityModal({ onSave, onClose }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const todayDMY = toDisplayInput(today);
+  const [f, setF] = useState({ type: "Email", date: todayDMY, note: "" });
+  const s = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  return (
+    <Modal title="Registra Attività" onClose={onClose}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+        <Field label="Tipo" half>
+          <select style={{ ...IS.select, width: "100%" }} value={f.type} onChange={(e) => s("type", e.target.value)}>
+            {ACTIVITY_TYPES.map((t) => <option key={t}>{t}</option>)}
+          </select>
+        </Field>
+        <Field label="Data" half>
+          <input type="text" placeholder="gg/mm/aaaa" style={IS.input} value={f.date} onChange={(e) => s("date", e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Descrizione / Esiti">
+        <textarea style={{ ...IS.textarea, minHeight: 110 }} value={f.note}
+          onChange={(e) => s("note", e.target.value)} placeholder="Descrivi interazione, esiti, prossimi step..." />
+      </Field>
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
+        <button style={IS.btnSecondary} onClick={onClose}>Annulla</button>
+        <button style={IS.btnPrimary} onClick={() => {
+              if (f.note.trim()) {
+                const iso = parseDMY(f.date);
+                onSave({ ...f, date: iso || today });
+                onClose();
+              }
+            }}>Registra</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── TOP NAV ─────────────────────────────────────────────────────────────────
+function Sidebar({ view, setView, data, onExport, onImport, onAI, showAI, syncStatus }) {
+  const pipeline = data.accounts.reduce((acc, a) =>
+    acc + a.opportunities.filter((o) => !["won", "lost"].includes(o.stage)).reduce((s, o) => s + (o.value || 0), 0), 0);
+  const navItems = [
+    { id: "dashboard", label: "Dashboard", icon: "◈" },
+    { id: "accounts",  label: "Prospect",  icon: "◉" },
+  ];
+  return (
+    <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`,
+      display: "flex", alignItems: "center", flexShrink: 0, height: 42, paddingRight: 10,
+      overflow: "hidden" }}>
+      {/* Logo */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 12px",
+        borderRight: `1px solid ${T.border}`, height: "100%", flexShrink: 0 }}>
+        <div style={{ width: 24, height: 24, borderRadius: 6, background: T.accent + "33",
+          border: `1.5px solid ${T.accent}66`, display: "flex", alignItems: "center",
+          justifyContent: "center", fontSize: 12, color: T.accent, fontWeight: 800 }}>O</div>
+        <div style={{ fontSize: 13, fontWeight: 800, color: T.text, letterSpacing: "-0.3px" }}>OpenMove</div>
+      </div>
+      {/* Nav */}
+      <nav style={{ display: "flex", alignItems: "center", height: "100%", padding: "0 6px", flexShrink: 0 }}>
+        {navItems.map((item) => (
+          <button key={item.id} onClick={() => setView(item.id)}
+            style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 8px", height: "100%",
+              border: "none", cursor: "pointer", fontSize: 12,
+              fontWeight: view === item.id ? 700 : 400,
+              background: "transparent",
+              color: view === item.id ? T.accent : T.muted,
+              borderBottom: view === item.id ? `2px solid ${T.accent}` : "2px solid transparent",
+              boxSizing: "border-box", whiteSpace: "nowrap" }}>
+            {item.label}
+          </button>
+        ))}
+      </nav>
+      {/* Spacer */}
+      <div style={{ flex: 1, minWidth: 0 }} />
+      {/* Sync status — fixed width, no overflow */}
+      <div style={{ width: 130, flexShrink: 0, display: "flex", justifyContent: "flex-end", marginRight: 8 }}>
+        {syncStatus !== "idle" && (
+          <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 8px",
+            borderRadius: 6, fontSize: 10, fontWeight: 600, whiteSpace: "nowrap",
+            background: syncStatus === "saved" ? T.win + "22" : syncStatus === "error" ? "#f8717122" : T.accent + "18",
+            color: syncStatus === "saved" ? T.win : syncStatus === "error" ? "#f87171" : T.accent,
+            border: `1px solid ${syncStatus === "saved" ? T.win : syncStatus === "error" ? "#f87171" : T.accent}33` }}>
+            {syncStatus === "saving" ? "↑ salvataggio…" : syncStatus === "saved" ? "✓ salvato" : "✕ errore sync"}
+          </div>
+        )}
+      </div>
+      {/* Pipeline pill */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 10px",
+        background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 7, marginRight: 10, flexShrink: 0 }}>
+        <div>
+          <div style={{ fontSize: 8, color: T.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>Pipeline</div>
+          <div style={{ fontSize: 13, fontWeight: 800, color: T.win, letterSpacing: "-0.4px", lineHeight: 1.2 }}>{fmtCur(pipeline)}</div>
+        </div>
+        <div style={{ width: 1, height: 22, background: T.border }} />
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: T.text }}>{data.accounts.length}</div>
+          <div style={{ fontSize: 8, color: T.muted, textTransform: "uppercase", letterSpacing: "0.08em" }}>prosp.</div>
+        </div>
+      </div>
+      {/* Export / Import / AI */}
+      <div style={{ display: "flex", gap: 3, marginRight: 8, flexShrink: 0 }}>
+        <button style={{ ...IS.btnSecondary, padding: "3px 7px", fontSize: 10 }} onClick={onExport}>↓ Esporta</button>
+        <label style={{ ...IS.btnSecondary, padding: "3px 7px", fontSize: 10, cursor: "pointer", display: "inline-flex", alignItems: "center" }}>
+          ↑ Importa
+          <input type="file" accept=".json" style={{ display: "none" }} onChange={onImport} />
+        </label>
+        <button onClick={onAI}
+          style={{ ...IS.btnSecondary, padding: "3px 8px", fontSize: 10, fontWeight: 700,
+            background: showAI ? T.accent + "22" : "transparent",
+            color: showAI ? T.accent : T.muted,
+            borderColor: showAI ? T.accent + "66" : undefined }}>
+          ✦ AI
+        </button>
+      </div>
+      {/* User */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+        <div style={{ width: 26, height: 26, borderRadius: "50%", background: T.accent + "33",
+          border: `1.5px solid ${T.accent}55`, display: "flex", alignItems: "center",
+          justifyContent: "center", fontSize: 10, fontWeight: 700, color: T.accent }}>M</div>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: T.text, lineHeight: 1.2 }}>Maurizio</div>
+          <div style={{ fontSize: 9, color: T.muted }}>Head of Mobility CC</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── DASHBOARD ───────────────────────────────────────────────────────────────
+function Dashboard({ data, setView, setSelectedId }) {
+  const allOpps = data.accounts.flatMap((a) => a.opportunities.map((o) => ({ ...o, accountName: a.name, accountId: a.id })));
+  const active = allOpps.filter((o) => !["won", "lost"].includes(o.stage));
+  const won = allOpps.filter((o) => o.stage === "won");
+  const totalPipeline = active.reduce((s, o) => s + (o.value || 0), 0);
+  const weighted = active.reduce((s, o) => s + (o.value || 0) * (o.probability || 0) / 100, 0);
+  const wonVal = won.reduce((s, o) => s + (o.value || 0), 0);
+
+  const recentActivities = data.accounts
+    .flatMap((a) => a.activities.map((ac) => ({ ...ac, accountName: a.name, accountId: a.id })))
+    .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
+
+  const topOpps = [...active].sort((a, b) => (b.value || 0) - (a.value || 0)).slice(0, 5);
+
+  const stageDistrib = STAGES.slice(0, 5).map((s) => ({
+    ...s,
+    value: active.filter((o) => o.stage === s.id).reduce((sum, o) => sum + (o.value || 0), 0),
+    count: active.filter((o) => o.stage === s.id).length,
+  }));
+
+  const kpis = [
+    { label: "Pipeline Totale", value: fmtCur(totalPipeline), sub: `${active.length} opportunità`, color: T.accent },
+    { label: "Pipeline Pesata", value: fmtCur(weighted), sub: "per probabilità", color: "#a78bfa" },
+    { label: "Vinto YTD", value: fmtCur(wonVal), sub: `${won.length} deal chiusi`, color: T.win },
+    { label: "Prospect Attivi", value: data.accounts.length, sub: "in gestione", color: "#fb923c" },
+  ];
+
+  return (
+    <div style={{ padding: 28, overflowY: "auto", height: "100%", boxSizing: "border-box" }}>
+      <div style={{ marginBottom: 22 }}>
+        <h1 style={{ color: T.text, fontSize: 20, fontWeight: 800, margin: 0 }}>Dashboard</h1>
+        <div style={{ color: T.muted, fontSize: 13, marginTop: 4 }}>Riepilogo attività commerciale OpenMove</div>
+      </div>
+      {/* KPIs */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 20 }}>
+        {kpis.map((k) => (
+          <div key={k.label} style={{ background: T.surface, border: `1px solid ${T.border}`,
+            borderRadius: 10, padding: "16px 18px", borderTop: `3px solid ${k.color}` }}>
+            <div style={{ fontSize: 10, color: T.muted, textTransform: "uppercase", letterSpacing: "0.08em",
+              fontWeight: 600, marginBottom: 8 }}>{k.label}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: k.color, letterSpacing: "-0.5px" }}>{k.value}</div>
+            <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{k.sub}</div>
+          </div>
+        ))}
+      </div>
+      {/* Row 2 */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr", gap: 14, marginBottom: 14 }}>
+        {/* Funnel */}
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: 18 }}>
+          <h3 style={{ color: T.text, fontSize: 12, fontWeight: 700, margin: "0 0 14px",
+            textTransform: "uppercase", letterSpacing: "0.06em" }}>Distribuzione Funnel</h3>
+          {stageDistrib.map((s) => (
+            <div key={s.id} style={{ marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ fontSize: 12, color: T.text }}>{s.label}</span>
+                <span style={{ fontSize: 11, color: s.color, fontWeight: 700 }}>{s.count} · {fmtCur(s.value)}</span>
+              </div>
+              <div style={{ background: T.bg, borderRadius: 4, height: 5 }}>
+                <div style={{ width: totalPipeline > 0 ? `${Math.min((s.value / totalPipeline) * 100, 100)}%` : "0%",
+                  background: s.color, height: "100%", borderRadius: 4 }} />
+              </div>
+            </div>
+          ))}
+        </div>
+        {/* Top Opps */}
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: 18 }}>
+          <h3 style={{ color: T.text, fontSize: 12, fontWeight: 700, margin: "0 0 14px",
+            textTransform: "uppercase", letterSpacing: "0.06em" }}>Top Opportunità</h3>
+          {topOpps.map((o) => (
+            <div key={o.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 10px",
+              borderBottom: `1px solid ${T.border}`, cursor: "pointer", borderRadius: 6,
+              transition: "background 0.15s" }}
+              onMouseEnter={(e) => e.currentTarget.style.background = T.surface2}
+              onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+              onClick={() => { setSelectedId(o.accountId); setView("detail"); }}>
+              <ProdBadge product={o.product} />
+              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+                <div style={{ fontSize: 13, color: T.text, fontWeight: 800, overflow: "hidden",
+                  textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.accountName}</div>
+                {o.title && <div style={{ fontSize: 11, color: T.muted, overflow: "hidden",
+                  textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.title}</div>}
+                <StageBadge id={o.stage} small />
+              </div>
+              <div style={{ textAlign: "right", flexShrink: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{fmtCur(o.value)}</div>
+                <div style={{ fontSize: 11, color: T.muted, textAlign: "right" }}>{o.probability}% prob.</div>
+              </div>
+            </div>
+          ))}
+          {topOpps.length === 0 && <div style={{ color: T.muted, fontSize: 13 }}>Nessuna opportunità attiva.</div>}
+        </div>
+      </div>
+      {/* Recent activities */}
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: 18 }}>
+        <h3 style={{ color: T.text, fontSize: 12, fontWeight: 700, margin: "0 0 14px",
+          textTransform: "uppercase", letterSpacing: "0.06em" }}>Attività Recenti</h3>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {recentActivities.map((a) => (
+            <div key={a.id} style={{ display: "flex", gap: 10, padding: "9px 12px",
+              background: T.surface2, borderRadius: 8, cursor: "pointer", minWidth: 0, overflow: "hidden" }}
+              onClick={() => { setSelectedId(a.accountId); setView("detail"); }}>
+              <div style={{ width: 26, height: 26, borderRadius: 7, background: T.accent + "22",
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>
+                {ACTIVITY_ICON[a.type] || "○"}
+              </div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 11, color: T.muted, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <span style={{ color: T.accent, fontWeight: 600 }}>{a.accountName}</span>
+                  <span style={{ margin: "0 4px" }}>·</span>{a.type}
+                  <span style={{ margin: "0 4px" }}>·</span>{fmtDate(a.date)}
+                </div>
+                <div style={{ fontSize: 12, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {a.note}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        {recentActivities.length === 0 && <div style={{ color: T.muted, fontSize: 13 }}>Nessuna attività registrata.</div>}
+      </div>
+    </div>
+  );
+}
+
+// ─── PIPELINE ─────────────────────────────────────────────────────────────────
+function PipelineView({ data, setData, setView, setSelectedId }) {
+  const activeStages = STAGES.filter((s) => !["won", "lost"].includes(s.id));
+  const allOpps = data.accounts.flatMap((a) => a.opportunities.map((o) => ({ ...o, accountName: a.name, accountId: a.id })));
+
+  const changeStage = (accountId, oppId, newStage) => {
+    setData((d) => ({
+      ...d,
+      accounts: d.accounts.map((a) =>
+        a.id !== accountId ? a : { ...a, opportunities: a.opportunities.map((o) => o.id !== oppId ? o : { ...o, stage: newStage }) }),
+    }));
+  };
+
+  return (
+    <div style={{ padding: "20px 22px", height: "100%", boxSizing: "border-box", display: "flex", flexDirection: "column" }}>
+      <div style={{ marginBottom: 18 }}>
+        <h1 style={{ color: T.text, fontSize: 20, fontWeight: 800, margin: 0 }}>Pipeline</h1>
+        <div style={{ color: T.muted, fontSize: 13, marginTop: 4 }}>
+          Tutte le opportunità per stage · {allOpps.length} totali
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8, flex: 1, minHeight: 0, alignItems: "start" }}>
+        {activeStages.map((stage) => {
+          const opps = allOpps.filter((o) => o.stage === stage.id);
+          const total = opps.reduce((s, o) => s + (o.value || 0), 0);
+          return (
+            <div key={stage.id} style={{ display: "flex", flexDirection: "column", minWidth: 0, maxHeight: "calc(100vh - 160px)" }}>
+              <div style={{ padding: "7px 10px", background: stage.color + "18", borderRadius: "8px 8px 0 0",
+                borderBottom: `2px solid ${stage.color}`, flexShrink: 0 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: stage.color, textTransform: "uppercase",
+                  letterSpacing: "0.05em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {stage.label}
+                </div>
+                <div style={{ fontSize: 10, color: T.muted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{opps.length} · {fmtCur(total)}</div>
+              </div>
+              <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderTop: "none",
+                borderRadius: "0 0 8px 8px", padding: 6, minHeight: 60, flex: 1,
+                display: "flex", flexDirection: "column", gap: 5, overflowY: "auto" }}>
+                {opps.map((o) => (
+                  <div key={o.id} style={{ background: T.surface2, borderRadius: 7, padding: "8px 9px",
+                    cursor: "pointer", border: `1px solid ${T.border}` }}
+                    onClick={() => { setSelectedId(o.accountId); setView("detail"); }}>
+                    <div style={{ fontSize: 10, color: T.text, fontWeight: 700, marginBottom: 2, overflow: "hidden",
+                      textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.accountName}</div>
+                    {o.title && <div style={{ fontSize: 9, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 3 }}>{o.title}</div>}
+                    <ProdBadge product={o.product} />
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: T.text }}>{fmtCur(o.value)}</span>
+                      <span style={{ fontSize: 10, color: T.muted }}>{o.probability}%</span>
+                    </div>
+                    {o.expectedClose && (
+                      <div style={{ fontSize: 10, color: T.muted, marginTop: 3 }}>⏱ {fmtDate(o.expectedClose)}</div>
+                    )}
+                    <select
+                      style={{ ...IS.select, fontSize: 10, padding: "3px 6px", marginTop: 6, width: "100%" }}
+                      value={o.stage}
+                      onChange={(e) => { e.stopPropagation(); changeStage(o.accountId, o.id, e.target.value); }}
+                      onClick={(e) => e.stopPropagation()}>
+                      {STAGES.map((st) => <option key={st.id} value={st.id}>{st.label}</option>)}
+                    </select>
+                  </div>
+                ))}
+                {opps.length === 0 && (
+                  <div style={{ fontSize: 12, color: T.muted, textAlign: "center", padding: "20px 0" }}>—</div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── ACCOUNT LIST ─────────────────────────────────────────────────────────────
+function AccountList({ data, setData, setView, setSelectedId, onNew }) {
+  const [search, setSearch] = useState("");
+  const [fType, setFType] = useState("");
+
+  const [fPri, setFPri] = useState("");
+
+  const filtered = data.accounts.filter((a) => {
+    const q = search.toLowerCase();
+    if (q && !a.name.toLowerCase().includes(q) && !a.region.toLowerCase().includes(q)) return false;
+    if (fType && a.type !== fType) return false;
+    if (fPri && a.priority !== fPri) return false;
+    return true;
+  });
+
+  return (
+    <div style={{ padding: 28, overflowY: "auto", height: "100%", boxSizing: "border-box" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div>
+          <h1 style={{ color: T.text, fontSize: 20, fontWeight: 800, margin: 0 }}>Prospect</h1>
+          <div style={{ color: T.muted, fontSize: 13, marginTop: 4 }}>{filtered.length} / {data.accounts.length} risultati</div>
+        </div>
+        <button style={IS.btnPrimary} onClick={onNew}>+ Nuovo Prospect</button>
+      </div>
+      {/* Filters */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+        <input style={{ ...IS.input, width: 200 }} placeholder="🔍 Cerca..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        <select style={IS.select} value={fType} onChange={(e) => setFType(e.target.value)}>
+          <option value="">Tutti i tipi</option>
+          {ENTITY_TYPES.map((t) => <option key={t}>{t}</option>)}
+        </select>
+
+        <select style={IS.select} value={fPri} onChange={(e) => setFPri(e.target.value)}>
+          <option value="">Tutte le priorità</option>
+          {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
+        </select>
+      </div>
+      {/* Table */}
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: T.surface2 }}>
+              {["Prospect", "Tipo", "Regione", "Priorità", "Opp.", "Pipeline", ""].map((h) => (
+                <th key={h} style={{ padding: "11px 14px", textAlign: "left", fontSize: 11, color: T.muted,
+                  fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((a) => {
+              const oppVal = a.opportunities.filter((o) => !["won","lost"].includes(o.stage)).reduce((s, o) => s + (o.value || 0), 0);
+              return (
+                <tr key={a.id} style={{ borderTop: `1px solid ${T.border}`, cursor: "pointer" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = T.surface2; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                  onClick={() => { setSelectedId(a.id); setView("detail"); }}>
+                  <td style={{ padding: "11px 14px" }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{a.name}</div>
+                    <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>
+                      {a.contacts.length} contatti · {a.activities.length} attività
+                    </div>
+                  </td>
+                  <td style={{ padding: "11px 14px", fontSize: 12, color: T.muted }}>{a.type}</td>
+                  <td style={{ padding: "11px 14px", fontSize: 12, color: T.muted }}>{a.region}</td>
+                  <td style={{ padding: "11px 14px" }}><PriBadge pri={a.priority} /></td>
+                  <td style={{ padding: "11px 14px", fontSize: 13, color: T.text, fontWeight: 600 }}>
+                    {a.opportunities.length}
+                  </td>
+                  <td style={{ padding: "11px 14px", fontSize: 13, color: T.accent, fontWeight: 700 }}>
+                    {oppVal > 0 ? fmtCur(oppVal) : "—"}
+                  </td>
+                  <td style={{ padding: "11px 14px", color: T.muted, fontSize: 16 }}>›</td>
+                  <td style={{ padding: "8px 10px" }} onClick={(e) => e.stopPropagation()}>
+                    <button onClick={(e) => {
+                        e.stopPropagation();
+                        setData((d) => ({ ...d, accounts: d.accounts.filter((x) => x.id !== a.id) }));
+                      }}
+                      style={{ background: "none", border: "none", color: "#f8717166", cursor: "pointer",
+                        fontSize: 16, padding: "4px 6px", borderRadius: 6 }}
+                      title="Elimina prospect">×</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {filtered.length === 0 && (
+          <div style={{ padding: 32, textAlign: "center", color: T.muted, fontSize: 14 }}>
+            Nessun prospect trovato.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── ACCOUNT DETAIL ───────────────────────────────────────────────────────────
+function AccountDetail({ accountId, data, setData, goBack, onDelete }) {
+  const [tab, setTab] = useState("overview");
+  const [showNewOpp, setShowNewOpp] = useState(false);
+  const [showNewContact, setShowNewContact] = useState(false);
+  const [showLogActivity, setShowLogActivity] = useState(false);
+  const [editNotes, setEditNotes] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [editDate, setEditDate] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editingOpp, setEditingOpp] = useState(null);
+  const [editingContact, setEditingContact] = useState(null);
+  const [editingActivity, setEditingActivity] = useState(null);
+  const [showEditAccount, setShowEditAccount] = useState(false);
+
+  const acc = data.accounts.find((a) => a.id === accountId);
+  if (!acc) return null;
+
+  const update = (fn) => setData((d) => ({ ...d, accounts: d.accounts.map((a) => a.id !== accountId ? a : fn(a)) }));
+
+  const oppVal = acc.opportunities.filter((o) => !["won","lost"].includes(o.stage)).reduce((s, o) => s + (o.value || 0), 0);
+  const tabs = ["overview", "opportunità", "contatti", "attività"];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      {showNewOpp && <NewOppModal onSave={(f) => update((a) => ({ ...a, opportunities: [...a.opportunities, { ...f, id: uid(), value: Number(f.value) || 0 }] }))} onClose={() => setShowNewOpp(false)} />}
+      {showNewContact && <NewContactModal onSave={(f) => update((a) => ({ ...a, contacts: [...a.contacts, { ...f, id: uid() }] }))} onClose={() => setShowNewContact(false)} />}
+      {showLogActivity && <LogActivityModal onSave={(f) => update((a) => ({ ...a, activities: [{ ...f, id: uid() }, ...a.activities] }))} onClose={() => setShowLogActivity(false)} />}
+      {editingOpp && <EditOppModal opp={editingOpp} onSave={(updated) => { update((a) => ({ ...a, opportunities: a.opportunities.map((op) => op.id !== editingOpp.id ? op : { ...op, ...updated }) })); setEditingOpp(null); }} onClose={() => setEditingOpp(null)} />}
+      {editingContact && <EditContactModal contact={editingContact} onSave={(updated) => { update((a) => ({ ...a, contacts: a.contacts.map((ct) => ct.id !== editingContact.id ? ct : { ...ct, ...updated }) })); setEditingContact(null); }} onClose={() => setEditingContact(null)} />}
+      {showEditAccount && <EditAccountModal account={acc} onSave={(updated) => { update((a) => ({ ...a, ...updated })); setShowEditAccount(false); }} onClose={() => setShowEditAccount(false)} />}
+      {editingActivity && <EditActivityModal activity={editingActivity} onSave={(updated) => { update((a) => ({ ...a, activities: a.activities.map((ac) => ac.id !== editingActivity.id ? ac : { ...ac, ...updated }) })); setEditingActivity(null); }} onClose={() => setEditingActivity(null)} />}
+
+      {/* Header */}
+      <div style={{ padding: "14px 26px", borderBottom: `1px solid ${T.border}`, background: T.surface, flexShrink: 0 }}>
+        <button onClick={goBack} style={{ background: "none", border: "none", color: T.muted,
+          cursor: "pointer", fontSize: 13, marginBottom: 10, padding: 0 }}>← Prospect</button>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <h1 style={{ color: T.text, fontSize: 18, fontWeight: 800, margin: "0 0 6px" }}>{acc.name}</h1>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontSize: 12, color: T.muted }}>{acc.type} · {acc.region}</span>
+              <PriBadge pri={acc.priority} />
+              {oppVal > 0 && <span style={{ fontSize: 12, color: T.accent, fontWeight: 700 }}>{fmtCur(oppVal)}</span>}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button style={{ ...IS.btnSecondary, fontSize: 12 }} onClick={() => setShowEditAccount(true)}>✎ Modifica</button>
+            <button style={IS.btnPrimary} onClick={() => setShowLogActivity(true)}>+ Attività</button>
+            {!confirmDelete
+              ? <button style={{ ...IS.btnSecondary, color: "#f87171", borderColor: "#f8717144" }}
+                  onClick={() => setConfirmDelete(true)}>Elimina prospect</button>
+              : <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <span style={{ fontSize: 12, color: "#f87171" }}>Confermi?</span>
+                  <button style={{ ...IS.btnSecondary, color: "#f87171", borderColor: "#f8717166", padding: "6px 12px" }}
+                    onClick={onDelete}>Sì, elimina</button>
+                  <button style={{ ...IS.btnSecondary, padding: "6px 12px" }}
+                    onClick={() => setConfirmDelete(false)}>Annulla</button>
+                </div>}
+
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: "flex", padding: "0 26px", borderBottom: `1px solid ${T.border}`, background: T.surface, flexShrink: 0 }}>
+        {tabs.map((t) => (
+          <button key={t} onClick={() => setTab(t)}
+            style={{ background: "none", border: "none", cursor: "pointer", padding: "11px 16px",
+              fontSize: 13, fontWeight: tab === t ? 700 : 400, color: tab === t ? T.accent : T.muted,
+              borderBottom: tab === t ? `2px solid ${T.accent}` : "2px solid transparent",
+              textTransform: "capitalize", marginBottom: -1 }}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div style={{ flex: 1, overflowY: "auto", padding: 26 }}>
+        {/* OVERVIEW */}
+        {tab === "overview" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <h3 style={{ color: T.text, fontSize: 12, fontWeight: 700, margin: 0, textTransform: "uppercase", letterSpacing: "0.06em" }}>Note & Contesto</h3>
+                {!editNotes
+                  ? <button style={{ ...IS.btnSecondary, padding: "4px 10px", fontSize: 11 }} onClick={() => { setNotes(acc.notes); setEditNotes(true); }}>Modifica</button>
+                  : <div style={{ display: "flex", gap: 6 }}>
+                    <button style={{ ...IS.btnSecondary, padding: "4px 10px", fontSize: 11 }} onClick={() => setEditNotes(false)}>Annulla</button>
+                    <button style={{ ...IS.btnPrimary, padding: "4px 10px", fontSize: 11 }} onClick={() => { update((a) => ({ ...a, notes })); setEditNotes(false); }}>Salva</button>
+                  </div>}
+              </div>
+              {editNotes
+                ? <textarea style={IS.textarea} value={notes} onChange={(e) => setNotes(e.target.value)} />
+                : <p style={{ color: acc.notes ? T.text : T.muted, fontSize: 13, lineHeight: 1.65, margin: 0 }}>{acc.notes || "Nessuna nota."}</p>}
+            </div>
+            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: 18 }}>
+              <h3 style={{ color: T.text, fontSize: 12, fontWeight: 700, margin: "0 0 12px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Riepilogo</h3>
+              {[
+                ["Tipo", acc.type], ["Regione", acc.region], ["Priorità", acc.priority],
+                ["Website", acc.website || "—"],
+                ["Opportunità", acc.opportunities.length], ["Contatti", acc.contacts.length], ["Attività", acc.activities.length],
+              ].map(([k, v]) => (
+                <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: `1px solid ${T.border}` }}>
+                  <span style={{ fontSize: 12, color: T.muted }}>{k}</span>
+                  <span style={{ fontSize: 12, color: T.text, fontWeight: 500 }}>{v}</span>
+                </div>
+              ))}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", borderBottom: `1px solid ${T.border}` }}>
+                <span style={{ fontSize: 12, color: T.muted }}>Prospect dal</span>
+                {editDate ? (
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input type="text" placeholder="gg/mm/aaaa"
+                      style={{ ...IS.input, width: 110, padding: "3px 8px", fontSize: 12 }}
+                      defaultValue={toDisplayInput(acc.createdAt)}
+                      id="edit-date-input" />
+                    <button style={{ ...IS.btnPrimary, padding: "3px 10px", fontSize: 11 }}
+                      onClick={() => {
+                        const raw = document.getElementById("edit-date-input").value;
+                        const iso = parseDMY(raw);
+                        if (iso) { update((a) => ({ ...a, createdAt: iso })); setEditDate(false); }
+                        else { document.getElementById("edit-date-input").style.borderColor = "#f87171"; }
+                      }}>✓</button>
+                    <button style={{ ...IS.btnSecondary, padding: "3px 10px", fontSize: 11 }}
+                      onClick={() => setEditDate(false)}>✕</button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: T.text, fontWeight: 500 }}>{fmtDate(acc.createdAt)}</span>
+                    <button onClick={() => setEditDate(true)}
+                      style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 11, padding: 0 }}>✎</button>
+                  </div>
+                )}
+              </div>
+            </div>
+            {acc.activities.length > 0 && (
+              <div style={{ gridColumn: "1/-1", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: 18 }}>
+                <h3 style={{ color: T.text, fontSize: 12, fontWeight: 700, margin: "0 0 12px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Ultime Attività</h3>
+                {[...acc.activities].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 2).map((a) => (
+                  <div key={a.id} style={{ display: "flex", gap: 12, marginBottom: 10 }}>
+                    <div style={{ width: 30, height: 30, borderRadius: 8, background: T.accent + "22",
+                      display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flexShrink: 0 }}>
+                      {ACTIVITY_ICON[a.type] || "○"}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: T.muted, marginBottom: 2 }}>{a.type} · {fmtDate(a.date)}</div>
+                      <div style={{ fontSize: 13, color: T.text }}>{a.note}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* OPPORTUNITÀ */}
+        {tab === "opportunità" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h3 style={{ color: T.text, fontSize: 14, fontWeight: 700, margin: 0 }}>Opportunità ({acc.opportunities.length})</h3>
+              <button style={IS.btnPrimary} onClick={() => setShowNewOpp(true)}>+ Opportunità</button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {acc.opportunities.map((o) => (
+                <div key={o.id} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: 16 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                    <div>
+                      {o.title && <div style={{ fontSize: 14, fontWeight: 800, color: T.text, marginBottom: 6 }}>{o.title}</div>}
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        <ProdBadge product={o.product} />
+                        <StageBadge id={o.stage} small />
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <span style={{ fontSize: 18, fontWeight: 800, color: T.text }}>{fmtCur(o.value)}</span>
+                      <button onClick={() => setEditingOpp(o)}
+                        style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 13, padding: "2px 6px",
+                          borderRadius: 6, border: `1px solid ${T.border}` }} title="Modifica">✎</button>
+                      <button onClick={() => update((a) => ({ ...a, opportunities: a.opportunities.filter((op) => op.id !== o.id) }))}
+                        style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 16, padding: "0 4px" }}>×</button>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 20, marginTop: 4 }}>
+                    <span style={{ fontSize: 12, color: T.muted }}>Probabilità: <strong style={{ color: T.text }}>{o.probability}%</strong></span>
+                    <span style={{ fontSize: 12, color: T.muted }}>Chiusura: <strong style={{ color: T.text }}>{fmtDate(o.expectedClose)}</strong></span>
+                  </div>
+                  {o.notes && <p style={{ fontSize: 12, color: T.muted, margin: "8px 0 0", lineHeight: 1.5 }}>{o.notes}</p>}
+                  <div style={{ background: T.bg, borderRadius: 4, height: 4, marginTop: 12 }}>
+                    <div style={{ width: `${o.probability}%`, background: o.stage === "won" ? T.win : T.accent, height: "100%", borderRadius: 4 }} />
+                  </div>
+                  <div style={{ marginTop: 10 }}>
+                    <select style={{ ...IS.select, fontSize: 12, width: "auto" }} value={o.stage}
+                      onChange={(e) => update((a) => ({ ...a, opportunities: a.opportunities.map((op) => op.id !== o.id ? op : { ...op, stage: e.target.value }) }))}>
+                      {STAGES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                    </select>
+                  </div>
+                </div>
+              ))}
+              {acc.opportunities.length === 0 && (
+                <div style={{ padding: 32, textAlign: "center", color: T.muted, fontSize: 14, background: T.surface, borderRadius: 10 }}>
+                  Nessuna opportunità. Aggiungine una!
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* CONTATTI */}
+        {tab === "contatti" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h3 style={{ color: T.text, fontSize: 14, fontWeight: 700, margin: 0 }}>Contatti ({acc.contacts.length})</h3>
+              <button style={IS.btnPrimary} onClick={() => setShowNewContact(true)}>+ Contatto</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+              {acc.contacts.map((c) => (
+                <div key={c.id} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: 16 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                      <div style={{ width: 38, height: 38, borderRadius: "50%", background: T.accent + "30",
+                        border: `1.5px solid ${T.accent}55`, display: "flex", alignItems: "center",
+                        justifyContent: "center", fontSize: 13, fontWeight: 700, color: T.accent, flexShrink: 0 }}>
+                        {(c.name || "?").split(" ").map((n) => n[0]).filter(Boolean).join("").slice(0, 2).toUpperCase() || "?"}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{c.name}</div>
+                        <div style={{ fontSize: 12, color: T.muted }}>{c.role}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => setEditingContact(c)}
+                        style={{ background: "none", border: `1px solid ${T.border}`, color: T.muted,
+                          cursor: "pointer", fontSize: 12, padding: "2px 7px", borderRadius: 6 }}>✎</button>
+                      <button onClick={() => update((a) => ({ ...a, contacts: a.contacts.filter((ct) => ct.id !== c.id) }))}
+                        style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 16 }}>×</button>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 5 }}>
+                    {c.email && <a href={`mailto:${c.email}`} style={{ fontSize: 12, color: T.accent, textDecoration: "none" }}>✉ {c.email}</a>}
+                    {c.phone && <span style={{ fontSize: 12, color: T.muted }}>☏ {c.phone}</span>}
+                  </div>
+                </div>
+              ))}
+              {acc.contacts.length === 0 && (
+                <div style={{ padding: 32, textAlign: "center", color: T.muted, fontSize: 14,
+                  background: T.surface, borderRadius: 10, gridColumn: "1/-1" }}>
+                  Nessun contatto. Aggiungine uno!
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ATTIVITÀ */}
+        {tab === "attività" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h3 style={{ color: T.text, fontSize: 14, fontWeight: 700, margin: 0 }}>Log Attività ({acc.activities.length})</h3>
+              <button style={IS.btnPrimary} onClick={() => setShowLogActivity(true)}>+ Attività</button>
+            {!confirmDelete
+              ? <button style={{ ...IS.btnSecondary, color: "#f87171", borderColor: "#f8717144" }}
+                  onClick={() => setConfirmDelete(true)}>Elimina prospect</button>
+              : <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <span style={{ fontSize: 12, color: "#f87171" }}>Confermi?</span>
+                  <button style={{ ...IS.btnSecondary, color: "#f87171", borderColor: "#f8717166", padding: "6px 12px" }}
+                    onClick={onDelete}>Sì, elimina</button>
+                  <button style={{ ...IS.btnSecondary, padding: "6px 12px" }}
+                    onClick={() => setConfirmDelete(false)}>Annulla</button>
+                </div>}
+
+            </div>
+            <div>
+              {[...acc.activities].sort((a, b) => b.date.localeCompare(a.date)).map((a, i, arr) => (
+                <div key={a.id} style={{ display: "flex", gap: 14, marginBottom: 14 }}>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+                    <div style={{ width: 34, height: 34, borderRadius: "50%", background: T.accent + "22",
+                      border: `1.5px solid ${T.accent}44`, display: "flex", alignItems: "center",
+                      justifyContent: "center", fontSize: 13 }}>
+                      {ACTIVITY_ICON[a.type] || "○"}
+                    </div>
+                    {i < arr.length - 1 && <div style={{ width: 1.5, flex: 1, background: T.border, marginTop: 4, marginBottom: 2 }} />}
+                  </div>
+                  <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: 14, flex: 1, marginBottom: 2 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: T.accent }}>{a.type}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 11, color: T.muted }}>{fmtDate(a.date)}</span>
+                        <button onClick={() => setEditingActivity(a)}
+                          style={{ background: "none", border: `1px solid ${T.border}`, color: T.muted,
+                            cursor: "pointer", fontSize: 11, padding: "2px 7px", borderRadius: 6 }}>✎</button>
+                        <button onClick={() => update((acc) => ({ ...acc, activities: acc.activities.filter((x) => x.id !== a.id) }))}
+                          style={{ background: "none", border: "none", color: "#f8717188", cursor: "pointer",
+                            fontSize: 15, lineHeight: 1, padding: "0 2px" }}
+                          title="Elimina attività">×</button>
+                      </div>
+                    </div>
+                    <p style={{ fontSize: 13, color: T.text, margin: 0, lineHeight: 1.6 }}>{a.note}</p>
+                  </div>
+                </div>
+              ))}
+              {acc.activities.length === 0 && (
+                <div style={{ padding: 32, textAlign: "center", color: T.muted, fontSize: 14, background: T.surface, borderRadius: 10 }}>
+                  Nessuna attività registrata.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+// ─── AI ASSISTANT PANEL ──────────────────────────────────────────────────────
+const SYSTEM_PROMPT = `Sei l'assistente AI integrato nel CRM OpenMove di Maurizio (Intellera/Accenture), consulente per lo sviluppo commerciale nel mercato della mobilità pubblica italiana.
+
+Hai accesso ai dati del CRM e puoi creare o aggiornare prospect, opportunità, contatti e attività rispondendo in linguaggio naturale.
+
+Struttura dati CRM:
+- accounts: array di prospect con campi: id, name, type (Comune|Città Metropolitana|Regione|Operatore TPL|Consorzio|Altro), region (Piemonte|Lombardia|Veneto|Liguria|Emilia-Romagna|Toscana|Lazio|Campania|Sicilia|Sardegna|Altro), priority (Alta|Media|Bassa), website, notes, createdAt (YYYY-MM-DD), contacts[], opportunities[], activities[]
+- contacts: { id, name, role, email, phone }
+- opportunities: { id, product (MaaS Platform|DRT|ABT|Google Maps Ticketing|Analytics & BI), stage, value (numero), probability (0-100), expectedClose (YYYY-MM-DD), notes }
+- activities: { id, type (Email|Chiamata|Riunione|Demo|Proposta|Nota interna), date (YYYY-MM-DD), note }
+
+Quando l'utente chiede di creare o modificare dati, rispondi SEMPRE con un JSON strutturato così:
+{
+  "message": "Testo di risposta all'utente (conferma o domanda)",
+  "action": "create_account" | "update_account" | "add_contact" | "add_opportunity" | "add_activity" | "none",
+  "data": { ... dati da applicare ... },
+  "targetAccountName": "nome del prospect target (per update/add_contact/add_opportunity/add_activity)"
+}
+
+Per create_account, data contiene i campi del nuovo account (senza id, contacts, opportunities, activities).
+Per add_activity, data contiene { type, date (YYYY-MM-DD), note }.
+Per add_opportunity, data contiene { product, stage, value, probability, expectedClose, notes }.
+Per add_contact, data contiene { name, role, email, phone }.
+Per update_account, data contiene solo i campi da aggiornare.
+Per none (solo risposta testuale), ometti data e targetAccountName.
+
+Usa sempre il tono professionale e diretto. Se mancano informazioni necessarie, chiedi solo quelle essenziali.
+I dati attuali del CRM ti verranno forniti ad ogni messaggio.
+
+IMPORTANTE: Rispondi ESCLUSIVAMENTE con un oggetto JSON valido. Nessun testo prima o dopo. Nessun markdown. Solo JSON puro.`;
+
+function AIChatPanel({ data, setData, setView, setSelectedId, onClose }) {
+  const [messages, setMessages] = useState([
+    { role: "assistant", text: "Ciao Maurizio! Puoi dirmi cosa vuoi fare. Ad esempio: \"Aggiungi AVM Venezia come operatore TPL in Veneto, priorità alta\" oppure \"Registra una chiamata con il Comune di Torino oggi: interesse confermato per demo ABT\"" }
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const applyAction = (action, actionData, targetAccountName) => {
+    if (action === "create_account") {
+      const newAcc = {
+        ...actionData,
+        id: uid(),
+        contacts: [],
+        opportunities: [],
+        activities: [],
+        createdAt: actionData.createdAt || new Date().toISOString().slice(0, 10),
+        priority: actionData.priority || "Media",
+        type: actionData.type || "Altro",
+        region: actionData.region || "Altro",
+        website: actionData.website || "",
+        notes: actionData.notes || "",
+      };
+      setData((d) => ({ ...d, accounts: [...d.accounts, newAcc] }));
+      setSelectedId(newAcc.id);
+      setView("detail");
+    } else if (["add_contact","add_opportunity","add_activity","update_account"].includes(action)) {
+      setData((d) => ({
+        ...d,
+        accounts: d.accounts.map((a) => {
+          if (a.name.toLowerCase() !== targetAccountName?.toLowerCase()) return a;
+          if (action === "add_contact")     return { ...a, contacts: [...a.contacts, { name: actionData.name || "", role: actionData.role || "", email: actionData.email || "", phone: actionData.phone || "", id: uid() }] };
+          if (action === "add_opportunity") return { ...a, opportunities: [...a.opportunities, { ...actionData, id: uid(), value: Number(actionData.value)||0 }] };
+          if (action === "add_activity")    return { ...a, activities: [{ type: actionData.type || "Nota interna", date: parseDMY(actionData.date) || new Date().toISOString().slice(0,10), note: actionData.note || actionData.notes || "", id: uid() }, ...a.activities] };
+          if (action === "update_account")  return { ...a, ...actionData };
+          return a;
+        }),
+      }));
+    }
+  };
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || loading) return;
+    const userMsg = { role: "user", text };
+    setMessages((m) => [...m, userMsg]);
+    setInput("");
+    setLoading(true);
+
+    const crmContext = `Dati CRM attuali:\n${JSON.stringify({ accounts: data.accounts.map((a) => ({ id: a.id, name: a.name, type: a.type, region: a.region, stage: a.stage, priority: a.priority })) }, null, 2)}`;
+
+    // Build full conversation history for the API
+    const history = [];
+    const prevMessages = [...messages];
+    // First user message always carries CRM context
+    for (let i = 0; i < prevMessages.length; i++) {
+      const m = prevMessages[i];
+      if (m.role === "assistant") {
+        history.push({ role: "assistant", content: m.text });
+      } else if (m.role === "user") {
+        // First user message gets CRM context prefix
+        const content = i === 0
+          ? `${crmContext}\n\n${m.text}`
+          : m.text;
+        history.push({ role: "user", content });
+      }
+    }
+    // Add current user message with updated CRM context
+    history.push({ role: "user", content: `${crmContext}\n\n${text}` });
+
+    try {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          system: SYSTEM_PROMPT,
+          messages: history,
+        }),
+      });
+      const result = await resp.json();
+      const raw = result.content?.find((b) => b.type === "text")?.text || "{}";
+      let parsed;
+      try {
+        // Estrai il primo oggetto JSON trovato nella risposta
+        const start = raw.indexOf("{");
+        const end = raw.lastIndexOf("}");
+        const jsonStr = start !== -1 && end !== -1 ? raw.slice(start, end + 1) : raw;
+        parsed = JSON.parse(jsonStr);
+      } catch {
+        parsed = { message: raw, action: "none" };
+      }
+
+      const assistantText = parsed.message || "Operazione completata.";
+      setMessages((m) => [...m, { role: "assistant", text: assistantText }]);
+
+      if (parsed.action && parsed.action !== "none" && parsed.data) {
+        try {
+          applyAction(parsed.action, parsed.data, parsed.targetAccountName);
+        } catch(err) {
+          setMessages((m) => [...m, { role: "assistant", text: "⚠ Errore nell'applicare la modifica: " + err.message }]);
+        }
+      }
+    } catch (err) {
+      setMessages((m) => [...m, { role: "assistant", text: "Errore di connessione all'API. Riprova." }]);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ position: "fixed", bottom: 20, right: 20, width: 380, zIndex: 8000,
+      background: T.surface, border: `1px solid ${T.border}`, borderRadius: 14,
+      display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.5)", overflow: "hidden" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "12px 16px", background: T.surface2, borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 26, height: 26, borderRadius: 7, background: T.accent + "33",
+            border: `1.5px solid ${T.accent}66`, display: "flex", alignItems: "center",
+            justifyContent: "center", fontSize: 12, color: T.accent, fontWeight: 800 }}>AI</div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>Assistente CRM</div>
+            <div style={{ fontSize: 10, color: T.muted }}>Powered by Claude</div>
+          </div>
+        </div>
+        <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted,
+          fontSize: 20, cursor: "pointer", lineHeight: 1, padding: "0 4px" }}>×</button>
+      </div>
+      {/* Messages */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "14px 14px 8px", display: "flex",
+        flexDirection: "column", gap: 10, maxHeight: 340, minHeight: 200 }}>
+        {messages.map((m, i) => (
+          <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+            <div style={{ maxWidth: "85%", padding: "9px 13px", borderRadius: m.role === "user" ? "12px 12px 4px 12px" : "12px 12px 12px 4px",
+              background: m.role === "user" ? T.accent : T.surface3,
+              color: T.text, fontSize: 13, lineHeight: 1.55 }}>
+              {m.text}
+            </div>
+          </div>
+        ))}
+        {loading && (
+          <div style={{ display: "flex", justifyContent: "flex-start" }}>
+            <div style={{ padding: "9px 13px", borderRadius: "12px 12px 12px 4px",
+              background: T.surface3, color: T.muted, fontSize: 13 }}>
+              ···
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+      {/* Input */}
+      <div style={{ padding: "10px 12px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 8, flexShrink: 0 }}>
+        <input style={{ ...IS.input, flex: 1, fontSize: 13 }}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder="Es: Aggiungi prospect Comune di Bari..." />
+        <button style={{ ...IS.btnPrimary, padding: "8px 14px", fontSize: 13 }} onClick={send} disabled={loading}>↑</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── MAIN ─────────────────────────────────────────────────────────────────────
+export default function OpenMoveCRM() {
+  const [data, setData] = useState(null);
+  const [view, setView] = useState("dashboard");
+  const [selectedId, setSelectedId] = useState(null);
+  const [showNewAccount, setShowNewAccount] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [showAI, setShowAI] = useState(false);
+  const [syncStatus, setSyncStatus] = useState("idle"); // idle | saving | saved | error
+
+  useEffect(() => {
+    const link = document.createElement("link");
+    link.href = "https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap";
+    link.rel = "stylesheet";
+    document.head.appendChild(link);
+
+  }, []);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const r = await window.storage.get("openmove_crm_local");
+        setData(r?.value ? JSON.parse(r.value) : INIT);
+      } catch {
+        setData(INIT);
+      }
+      setLoading(false);
+    };
+    load();
+  }, []);
+
+  const saveTimeoutRef = useRef(null);
+  useEffect(() => {
+    if (!data) return;
+    // local backup always
+    window.storage.set("openmove_crm_local", JSON.stringify(data)).catch(() => {});
+    // debounced Drive save
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    setSyncStatus("saving");
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        await fetch(`${DRIVE_URL}?token=${DRIVE_TOKEN}`, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "text/plain" },
+          body: JSON.stringify(data),
+        });
+        setSyncStatus("saved");
+        setTimeout(() => setSyncStatus("idle"), 2500);
+      } catch {
+        setSyncStatus("error");
+      }
+    }, 1200);
+  }, [data]);
+
+  const addAccount = (form) => {
+    const a = { ...form, id: uid(), contacts: [], opportunities: [], activities: [], createdAt: new Date().toISOString().slice(0, 10) };
+    setData((d) => ({ ...d, accounts: [...d.accounts, a] }));
+    setSelectedId(a.id);
+    setView("detail");
+  };
+
+  const setViewAndClear = (v) => { if (v !== "detail") setSelectedId(null); setView(v); };
+
+  const handleExport = () => {
+    const json = JSON.stringify(data, null, 2);
+    const b64 = btoa(unescape(encodeURIComponent(json)));
+    const a = document.createElement("a");
+    a.href = "data:application/json;base64," + b64;
+    a.download = `openmove_crm_${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const handleImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if (parsed && Array.isArray(parsed.accounts)) {
+          setData(parsed);
+          e.target.value = "";
+        } else {
+          alert("File JSON non valido: struttura non riconosciuta.");
+        }
+      } catch {
+        alert("Errore nella lettura del file JSON.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  if (loading) {
+    return (
+      <div style={{ background: T.bg, height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Outfit, sans-serif" }}>
+        <div style={{ color: T.accent, fontSize: 15, fontWeight: 600 }}>Caricamento CRM OpenMove...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: T.bg, fontFamily: "Outfit, sans-serif", overflow: "hidden", fontSize: 14 }}>
+      {showNewAccount && <NewAccountModal onSave={addAccount} onClose={() => setShowNewAccount(false)} />}
+      <Sidebar view={view} setView={setViewAndClear} data={data} onExport={handleExport} onImport={handleImport} onAI={() => setShowAI((v) => !v)} showAI={showAI} syncStatus={syncStatus} />
+      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        {view === "dashboard" && <Dashboard data={data} setView={setView} setSelectedId={setSelectedId} />}
+        {view === "pipeline" && <PipelineView data={data} setData={setData} setView={setView} setSelectedId={setSelectedId} />}
+        {view === "accounts" && <AccountList data={data} setData={setData} setView={setView} setSelectedId={setSelectedId} onNew={() => setShowNewAccount(true)} />}
+        {view === "detail" && selectedId && (
+          <AccountDetail key={selectedId} accountId={selectedId} data={data} setData={setData} goBack={() => setView("accounts")}
+            onDelete={() => { setData((d) => ({ ...d, accounts: d.accounts.filter((a) => a.id !== selectedId) })); setView("accounts"); }} />
+        )}
+      </div>
+      {showAI && <AIChatPanel data={data} setData={setData} setView={setView} setSelectedId={setSelectedId} onClose={() => setShowAI(false)} />}
+    </div>
+  );
+}
+
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(React.createElement(OpenMoveCRM));
+  </script>
+</body>
+</html>
