@@ -46,7 +46,7 @@ const ACTIVITY_TYPES = ["Email", "Chiamata", "Riunione", "Demo", "Proposta", "No
 const ACTIVITY_ICON = { Email: "✉", Chiamata: "☏", Riunione: "◉", Demo: "▶", Proposta: "◆", "Nota interna": "✎" };
 const REGIONS = ["Abruzzo","Basilicata","Calabria","Campania","Emilia-Romagna","Friuli-Venezia Giulia","Lazio","Liguria","Lombardia","Marche","Molise","Piemonte","Puglia","Sardegna","Sicilia","Toscana","Trentino-Alto Adige","Umbria","Valle d'Aosta","Veneto","Altro"];
 
-const INIT = { accounts: [] };
+const INIT = { accounts: [], _version: 1, _lastSaved: null };
 
 const DRIVE_URL = "https://script.google.com/macros/s/AKfycbyclBjURR1GXPhrRtswuyqtrnfGUioAoKxqAt6OI9HCtSoLBkjqyg4lnEeIFR3w2PdE/exec";
 const DRIVE_TOKEN = "igdpiugxiusg232GJGS2JG2S82jgsj2";
@@ -529,14 +529,14 @@ function Sidebar({ view, setView, data, onExport, onImport, onAI, showAI, syncSt
       {/* Spacer */}
       <div style={{ flex: 1, minWidth: 0 }} />
       {/* Sync status — fixed width, no overflow */}
-      <div style={{ width: 130, flexShrink: 0, display: "flex", justifyContent: "flex-end", marginRight: 8 }}>
+      <div style={{ width: 150, flexShrink: 0, display: "flex", justifyContent: "flex-end", marginRight: 8 }}>
         {syncStatus !== "idle" && (
           <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 8px",
             borderRadius: 6, fontSize: 10, fontWeight: 600, whiteSpace: "nowrap",
-            background: syncStatus === "saved" ? T.win + "22" : syncStatus === "error" ? "#f8717122" : T.accent + "18",
-            color: syncStatus === "saved" ? T.win : syncStatus === "error" ? "#f87171" : T.accent,
-            border: `1px solid ${syncStatus === "saved" ? T.win : syncStatus === "error" ? "#f87171" : T.accent}33` }}>
-            {syncStatus === "saving" ? "↑ salvataggio…" : syncStatus === "saved" ? "✓ salvato" : "✕ errore sync"}
+            background: syncStatus === "saved" ? T.win + "22" : syncStatus === "refreshed" ? "#a78bfa22" : syncStatus === "conflict" ? "#f8717122" : syncStatus === "error" ? "#f8717122" : T.accent + "18",
+            color: syncStatus === "saved" ? T.win : syncStatus === "refreshed" ? "#a78bfa" : syncStatus === "conflict" ? "#f87171" : syncStatus === "error" ? "#f87171" : T.accent,
+            border: `1px solid ${syncStatus === "saved" ? T.win : syncStatus === "refreshed" ? "#a78bfa" : "#f87171"}33` }}>
+            {syncStatus === "saving" ? "↑ salvataggio…" : syncStatus === "saved" ? "✓ salvato" : syncStatus === "refreshed" ? "↓ aggiornato" : syncStatus === "conflict" ? "⚠ conflitto" : "✕ errore sync"}
           </div>
         )}
       </div>
@@ -1449,7 +1449,8 @@ function OpenMoveCRM() {
   const [showNewAccount, setShowNewAccount] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showAI, setShowAI] = useState(false);
-  const [syncStatus, setSyncStatus] = useState("idle"); // idle | saving | saved | error
+  const [syncStatus, setSyncStatus] = useState("idle"); // idle | saving | saved | refreshed | conflict | error
+  const [conflictWarning, setConflictWarning] = useState(false);
 
   useEffect(() => {
     const link = document.createElement("link");
@@ -1473,26 +1474,73 @@ function OpenMoveCRM() {
   }, []);
 
   const saveTimeoutRef = useRef(null);
+  const driveVersionRef = useRef(1);
+  const pendingSaveRef = useRef(false);
+
+  // ── Fetch data from Drive ──
+  const fetchFromDrive = async () => {
+    try {
+      const resp = await fetch(`${DRIVE_URL}?token=${DRIVE_TOKEN}`, { mode: "cors" });
+      const json = await resp.json();
+      if (json && Array.isArray(json.accounts)) return json;
+    } catch {}
+    return null;
+  };
+
+  // ── Polling: re-read Drive every 60s ──
   useEffect(() => {
     if (!data) return;
-    // local backup always
+    const interval = setInterval(async () => {
+      if (pendingSaveRef.current) return; // skip if we're about to save
+      const remote = await fetchFromDrive();
+      if (!remote) return;
+      const remoteVer = remote._version || 1;
+      if (remoteVer > driveVersionRef.current) {
+        driveVersionRef.current = remoteVer;
+        setData(remote);
+        setSyncStatus("refreshed");
+        setTimeout(() => setSyncStatus("idle"), 2500);
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [data]);
+
+  // ── Save with optimistic locking ──
+  useEffect(() => {
+    if (!data) return;
     try { localStorage.setItem("openmove_crm_local", JSON.stringify(data)); } catch {}
-    // debounced Drive save
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    pendingSaveRef.current = true;
     setSyncStatus("saving");
     saveTimeoutRef.current = setTimeout(async () => {
       try {
+        // 1. Check current Drive version before saving
+        const remote = await fetchFromDrive();
+        const remoteVer = remote?._version || 1;
+        if (remote && remoteVer > driveVersionRef.current) {
+          // Conflict: someone else saved in the meantime
+          driveVersionRef.current = remoteVer;
+          setConflictWarning(true);
+          setSyncStatus("conflict");
+          pendingSaveRef.current = false;
+          return;
+        }
+        // 2. Increment version and save
+        const newVersion = (driveVersionRef.current || 1) + 1;
+        driveVersionRef.current = newVersion;
+        const payload = { ...data, _version: newVersion, _lastSaved: new Date().toISOString() };
         await fetch(`${DRIVE_URL}?token=${DRIVE_TOKEN}`, {
           method: "POST",
           mode: "no-cors",
           headers: { "Content-Type": "text/plain" },
-          body: JSON.stringify(data),
+          body: JSON.stringify(payload),
         });
         setSyncStatus("saved");
         setTimeout(() => setSyncStatus("idle"), 2500);
       } catch {
         setSyncStatus("error");
       }
+      pendingSaveRef.current = false;
     }, 1200);
   }, [data]);
 
@@ -1560,6 +1608,24 @@ function OpenMoveCRM() {
         )}
       </div>
       {showAI && <AIChatPanel data={data} setData={setData} setView={setView} setSelectedId={setSelectedId} onClose={() => setShowAI(false)} />}
+      {conflictWarning && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex",
+          alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
+          <div style={{ background: "#0d1e38", border: "1px solid #f8717166", borderRadius: 14,
+            padding: 28, maxWidth: 420, width: "90%" }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#f87171", marginBottom: 12 }}>⚠ Conflitto di salvataggio</div>
+            <p style={{ fontSize: 13, color: "#e2e8f0", lineHeight: 1.6, marginBottom: 20 }}>
+              Un altro utente ha salvato modifiche mentre lavoravi. I dati sono stati aggiornati alla versione più recente.
+              Le tue ultime modifiche potrebbero non essere state salvate — riapplicale e salva di nuovo.
+            </p>
+            <button onClick={() => { setConflictWarning(false); setSyncStatus("idle"); }}
+              style={{ background: "#2172f5", color: "#fff", border: "none", borderRadius: 8,
+                padding: "9px 20px", fontSize: 13, fontWeight: 700, cursor: "pointer", width: "100%" }}>
+              Ho capito
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
