@@ -1441,6 +1441,76 @@ function LoginScreen({ onLogin }) {
   );
 }
 
+
+// ─── DIFF HELPER ─────────────────────────────────────────────────────────────
+function summarizeChanges(before, after) {
+  const changes = [];
+  if (!before || !after) return changes;
+
+  const beforeAccMap = Object.fromEntries((before.accounts || []).map(a => [a.id, a]));
+  const afterAccMap  = Object.fromEntries((after.accounts  || []).map(a => [a.id, a]));
+
+  // New accounts
+  for (const a of (after.accounts || [])) {
+    if (!beforeAccMap[a.id]) {
+      changes.push(`Creato prospect: ${a.name}`);
+    }
+  }
+  // Deleted accounts
+  for (const a of (before.accounts || [])) {
+    if (!afterAccMap[a.id]) {
+      changes.push(`Eliminato prospect: ${a.name}`);
+    }
+  }
+  // Modified accounts
+  for (const a of (after.accounts || [])) {
+    const old = beforeAccMap[a.id];
+    if (!old) continue;
+
+    // New opportunities
+    const oldOppIds = new Set((old.opportunities || []).map(o => o.id));
+    for (const o of (a.opportunities || [])) {
+      if (!oldOppIds.has(o.id)) {
+        changes.push(`Aggiunta opportunità "${o.title || o.product}" su ${a.name}`);
+      }
+    }
+    // Deleted opportunities
+    const newOppIds = new Set((a.opportunities || []).map(o => o.id));
+    for (const o of (old.opportunities || [])) {
+      if (!newOppIds.has(o.id)) {
+        changes.push(`Rimossa opportunità "${o.title || o.product}" da ${a.name}`);
+      }
+    }
+    // Modified opportunity stage/value
+    for (const o of (a.opportunities || [])) {
+      const oldO = (old.opportunities || []).find(x => x.id === o.id);
+      if (oldO && oldO.stage !== o.stage) {
+        changes.push(`Opportunità "${o.title || o.product}" (${a.name}): stage → ${o.stage}`);
+      }
+    }
+    // New contacts
+    const oldContIds = new Set((old.contacts || []).map(x => x.id));
+    for (const ct of (a.contacts || [])) {
+      if (!oldContIds.has(ct.id)) {
+        changes.push(`Aggiunto contatto ${ct.name} su ${a.name}`);
+      }
+    }
+    // New activities
+    const oldActIds = new Set((old.activities || []).map(x => x.id));
+    for (const ac of (a.activities || [])) {
+      if (!oldActIds.has(ac.id)) {
+        changes.push(`Registrata attività "${ac.type}" su ${a.name}`);
+      }
+    }
+    // Account fields changed
+    if (old.name !== a.name) changes.push(`Rinominato prospect: ${old.name} → ${a.name}`);
+    if (old.priority !== a.priority) changes.push(`Priorità ${a.name}: ${old.priority} → ${a.priority}`);
+    if (old.notes !== a.notes) changes.push(`Note aggiornate su ${a.name}`);
+  }
+
+  return changes.slice(0, 10); // cap at 10
+}
+
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 function OpenMoveCRM() {
   const [data, setData] = useState(null);
@@ -1476,6 +1546,8 @@ function OpenMoveCRM() {
   const saveTimeoutRef = useRef(null);
   const driveVersionRef = useRef(1);
   const pendingSaveRef = useRef(false);
+  const lastSavedSnapshotRef = useRef(null);
+  const [conflictChanges, setConflictChanges] = useState([]);
 
   // ── Fetch data from Drive ──
   const fetchFromDrive = async () => {
@@ -1519,7 +1591,10 @@ function OpenMoveCRM() {
         const remoteVer = remote?._version || 1;
         if (remote && remoteVer > driveVersionRef.current) {
           // Conflict: someone else saved in the meantime
+          const changes = summarizeChanges(lastSavedSnapshotRef.current, data);
+          setConflictChanges(changes);
           driveVersionRef.current = remoteVer;
+          setData(remote);
           setConflictWarning(true);
           setSyncStatus("conflict");
           pendingSaveRef.current = false;
@@ -1535,6 +1610,7 @@ function OpenMoveCRM() {
           headers: { "Content-Type": "text/plain" },
           body: JSON.stringify(payload),
         });
+        lastSavedSnapshotRef.current = JSON.parse(JSON.stringify(data));
         setSyncStatus("saved");
         setTimeout(() => setSyncStatus("idle"), 2500);
       } catch {
@@ -1612,16 +1688,38 @@ function OpenMoveCRM() {
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex",
           alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
           <div style={{ background: "#0d1e38", border: "1px solid #f8717166", borderRadius: 14,
-            padding: 28, maxWidth: 420, width: "90%" }}>
-            <div style={{ fontSize: 16, fontWeight: 800, color: "#f87171", marginBottom: 12 }}>⚠ Conflitto di salvataggio</div>
-            <p style={{ fontSize: 13, color: "#e2e8f0", lineHeight: 1.6, marginBottom: 20 }}>
-              Un altro utente ha salvato modifiche mentre lavoravi. I dati sono stati aggiornati alla versione più recente.
-              Le tue ultime modifiche potrebbero non essere state salvate — riapplicale e salva di nuovo.
+            padding: 28, maxWidth: 440, width: "90%" }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#f87171", marginBottom: 10 }}>⚠ Conflitto di salvataggio</div>
+            <p style={{ fontSize: 13, color: "#7090b0", lineHeight: 1.6, marginBottom: 16 }}>
+              Un altro utente ha salvato mentre lavoravi. I dati sono stati aggiornati alla versione del server.
             </p>
+            {conflictChanges.length > 0 && (
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#fb923c", textTransform: "uppercase",
+                  letterSpacing: "0.08em", marginBottom: 8 }}>Le tue modifiche non salvate:</div>
+                <div style={{ background: "#07111f", borderRadius: 8, padding: "10px 14px",
+                  border: "1px solid #1e3a60", maxHeight: 180, overflowY: "auto" }}>
+                  {conflictChanges.map((ch, i) => (
+                    <div key={i} style={{ fontSize: 12, color: "#e2e8f0", padding: "4px 0",
+                      borderBottom: i < conflictChanges.length - 1 ? "1px solid #1e3a6044" : "none" }}>
+                      • {ch}
+                    </div>
+                  ))}
+                </div>
+                <p style={{ fontSize: 12, color: "#fb923c", marginTop: 10, lineHeight: 1.5 }}>
+                  Riapplica manualmente queste modifiche e salva di nuovo.
+                </p>
+              </div>
+            )}
+            {conflictChanges.length === 0 && (
+              <p style={{ fontSize: 12, color: "#7090b0", marginBottom: 16 }}>
+                Non sono state rilevate modifiche locali specifiche.
+              </p>
+            )}
             <button onClick={() => { setConflictWarning(false); setSyncStatus("idle"); }}
               style={{ background: "#2172f5", color: "#fff", border: "none", borderRadius: 8,
                 padding: "9px 20px", fontSize: 13, fontWeight: 700, cursor: "pointer", width: "100%" }}>
-              Ho capito
+              Ho capito, riapplico le modifiche
             </button>
           </div>
         </div>
