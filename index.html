@@ -1538,15 +1538,17 @@ function OpenMoveCRM() {
       } catch {
         setData(INIT);
       }
+      isReadyRef.current = true;
       setLoading(false);
     };
     load();
   }, []);
 
   const saveTimeoutRef = useRef(null);
-  const driveVersionRef = useRef(1);        // version we loaded from Drive (JSONt0 version)
-  const skipSaveRef = useRef(false);        // true when setData is called internally (not by user)
-  const snapshotRef = useRef(null);         // JSONt0: snapshot at last successful load/save
+  const driveVersionRef = useRef(1);
+  const skipSaveRef = useRef(false);
+  const snapshotRef = useRef(null);
+  const isReadyRef = useRef(false);          // false until initial load complete
   const [conflictChanges, setConflictChanges] = useState([]);
 
   // ── Fetch data from Drive ──
@@ -1589,6 +1591,8 @@ function OpenMoveCRM() {
   useEffect(() => {
     if (!data) return;
 
+    // Block saves until initial load is complete
+    if (!isReadyRef.current) return;
     // If this setData was triggered internally (conflict load / polling), skip save
     if (skipSaveRef.current) {
       skipSaveRef.current = false;
