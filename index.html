@@ -1544,9 +1544,9 @@ function OpenMoveCRM() {
   }, []);
 
   const saveTimeoutRef = useRef(null);
-  const driveVersionRef = useRef(1);
-  const pendingSaveRef = useRef(false);
-  const lastSavedSnapshotRef = useRef(null);
+  const driveVersionRef = useRef(1);        // version we loaded from Drive (JSONt0 version)
+  const skipSaveRef = useRef(false);        // true when setData is called internally (not by user)
+  const snapshotRef = useRef(null);         // JSONt0: snapshot at last successful load/save
   const [conflictChanges, setConflictChanges] = useState([]);
 
   // ── Fetch data from Drive ──
@@ -1559,17 +1559,25 @@ function OpenMoveCRM() {
     return null;
   };
 
+  // ── Load remote silently (polling or post-conflict) — no save triggered ──
+  const loadRemote = (remote) => {
+    skipSaveRef.current = true;
+    driveVersionRef.current = remote._version || 1;
+    snapshotRef.current = JSON.parse(JSON.stringify(remote));
+    setData(remote);
+    try { localStorage.setItem("openmove_crm_local", JSON.stringify(remote)); } catch {}
+  };
+
   // ── Polling: re-read Drive every 60s ──
   useEffect(() => {
     if (!data) return;
     const interval = setInterval(async () => {
-      if (pendingSaveRef.current) return; // skip if we're about to save
+      if (saveTimeoutRef.current) return; // skip if a save is pending
       const remote = await fetchFromDrive();
       if (!remote) return;
       const remoteVer = remote._version || 1;
       if (remoteVer > driveVersionRef.current) {
-        driveVersionRef.current = remoteVer;
-        setData(remote);
+        loadRemote(remote);
         setSyncStatus("refreshed");
         setTimeout(() => setSyncStatus("idle"), 2500);
       }
@@ -1580,29 +1588,40 @@ function OpenMoveCRM() {
   // ── Save with optimistic locking ──
   useEffect(() => {
     if (!data) return;
+
+    // If this setData was triggered internally (conflict load / polling), skip save
+    if (skipSaveRef.current) {
+      skipSaveRef.current = false;
+      return;
+    }
+
     try { localStorage.setItem("openmove_crm_local", JSON.stringify(data)); } catch {}
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    pendingSaveRef.current = true;
     setSyncStatus("saving");
+
     saveTimeoutRef.current = setTimeout(async () => {
+      saveTimeoutRef.current = null;
       try {
-        // 1. Check current Drive version before saving
+        // 1. Fetch JSONt2 from server to check for concurrent edits
         const remote = await fetchFromDrive();
         const remoteVer = remote?._version || 1;
+
         if (remote && remoteVer > driveVersionRef.current) {
-          // Conflict: someone else saved in the meantime
-          const changes = summarizeChanges(lastSavedSnapshotRef.current, data);
+          // ── CONFLICT ──
+          // Compute diff: what changed between JSONt0 (snapshotRef) and JSONt1 (data)
+          const changes = summarizeChanges(snapshotRef.current, data);
           setConflictChanges(changes);
-          driveVersionRef.current = remoteVer;
-          setData(remote);
           setConflictWarning(true);
           setSyncStatus("conflict");
-          pendingSaveRef.current = false;
+          // Load JSONt2 into client WITHOUT triggering another save
+          loadRemote(remote);
           return;
         }
-        // 2. Increment version and save
+
+        // 2. No conflict — save JSONt1 as new version
         const newVersion = (driveVersionRef.current || 1) + 1;
         driveVersionRef.current = newVersion;
+        snapshotRef.current = JSON.parse(JSON.stringify(data));
         const payload = { ...data, _version: newVersion, _lastSaved: new Date().toISOString() };
         await fetch(`${DRIVE_URL}?token=${DRIVE_TOKEN}`, {
           method: "POST",
@@ -1610,13 +1629,11 @@ function OpenMoveCRM() {
           headers: { "Content-Type": "text/plain" },
           body: JSON.stringify(payload),
         });
-        lastSavedSnapshotRef.current = JSON.parse(JSON.stringify(data));
         setSyncStatus("saved");
         setTimeout(() => setSyncStatus("idle"), 2500);
       } catch {
         setSyncStatus("error");
       }
-      pendingSaveRef.current = false;
     }, 1200);
   }, [data]);
 
