@@ -1538,17 +1538,14 @@ function OpenMoveCRM() {
       } catch {
         setData(INIT);
       }
-      isReadyRef.current = true;
       setLoading(false);
     };
     load();
   }, []);
 
   const saveTimeoutRef = useRef(null);
-  const driveVersionRef = useRef(1);
-  const skipSaveRef = useRef(false);
-  const snapshotRef = useRef(null);
-  const isReadyRef = useRef(false);          // false until initial load complete
+  const driveVersionRef = useRef(0);   // 0 = not yet loaded from Drive
+  const snapshotRef = useRef(null);    // JSONt0: last state successfully loaded/saved
   const [conflictChanges, setConflictChanges] = useState([]);
 
   // ── Fetch data from Drive ──
@@ -1561,72 +1558,38 @@ function OpenMoveCRM() {
     return null;
   };
 
-  // ── Load remote silently (polling or post-conflict) — no save triggered ──
-  const loadRemote = (remote) => {
-    skipSaveRef.current = true;
-    driveVersionRef.current = remote._version || 1;
-    snapshotRef.current = JSON.parse(JSON.stringify(remote));
-    setData(remote);
-    try { localStorage.setItem("openmove_crm_local", JSON.stringify(remote)); } catch {}
-  };
-
-  // ── Polling: re-read Drive every 60s ──
-  useEffect(() => {
-    if (!data) return;
-    const interval = setInterval(async () => {
-      if (saveTimeoutRef.current) return; // skip if a save is pending
-      const remote = await fetchFromDrive();
-      if (!remote) return;
-      const remoteVer = remote._version || 1;
-      if (remoteVer > driveVersionRef.current) {
-        loadRemote(remote);
-        setSyncStatus("refreshed");
-        setTimeout(() => setSyncStatus("idle"), 2500);
-      }
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [data]);
-
-  // ── Save with optimistic locking ──
-  useEffect(() => {
-    if (!data) return;
-
-    // Block saves until initial load is complete
-    if (!isReadyRef.current) return;
-    // If this setData was triggered internally (conflict load / polling), skip save
-    if (skipSaveRef.current) {
-      skipSaveRef.current = false;
-      return;
-    }
-
-    try { localStorage.setItem("openmove_crm_local", JSON.stringify(data)); } catch {}
+  // ── Explicit save function — the ONLY way data gets saved to Drive ──
+  const saveData = (newData, opts = {}) => {
+    const { forceSave = false } = opts;
+    setData(newData);
+    try { localStorage.setItem("openmove_crm_local", JSON.stringify(newData)); } catch {}
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     setSyncStatus("saving");
-
     saveTimeoutRef.current = setTimeout(async () => {
       saveTimeoutRef.current = null;
       try {
-        // 1. Fetch JSONt2 from server to check for concurrent edits
         const remote = await fetchFromDrive();
-        const remoteVer = remote?._version || 1;
+        const remoteVer = remote?._version || 0;
 
-        if (remote && remoteVer > driveVersionRef.current) {
-          // ── CONFLICT ──
-          // Compute diff: what changed between JSONt0 (snapshotRef) and JSONt1 (data)
-          const changes = summarizeChanges(snapshotRef.current, data);
+        if (!forceSave && remote && driveVersionRef.current > 0 && remoteVer > driveVersionRef.current) {
+          // ── CONFLICT: server has newer version ──
+          const changes = summarizeChanges(snapshotRef.current, newData);
           setConflictChanges(changes);
           setConflictWarning(true);
           setSyncStatus("conflict");
-          // Load JSONt2 into client WITHOUT triggering another save
-          loadRemote(remote);
+          // Load server version silently
+          driveVersionRef.current = remoteVer;
+          snapshotRef.current = JSON.parse(JSON.stringify(remote));
+          setData(remote);
+          try { localStorage.setItem("openmove_crm_local", JSON.stringify(remote)); } catch {}
           return;
         }
 
-        // 2. No conflict — save JSONt1 as new version
-        const newVersion = (driveVersionRef.current || 1) + 1;
+        // ── Save ──
+        const newVersion = Math.max(driveVersionRef.current, remoteVer) + 1;
         driveVersionRef.current = newVersion;
-        snapshotRef.current = JSON.parse(JSON.stringify(data));
-        const payload = { ...data, _version: newVersion, _lastSaved: new Date().toISOString() };
+        const payload = { ...newData, _version: newVersion, _lastSaved: new Date().toISOString() };
+        snapshotRef.current = JSON.parse(JSON.stringify(newData));
         await fetch(`${DRIVE_URL}?token=${DRIVE_TOKEN}`, {
           method: "POST",
           mode: "no-cors",
@@ -1639,16 +1602,76 @@ function OpenMoveCRM() {
         setSyncStatus("error");
       }
     }, 1200);
-  }, [data]);
+  };
+
+  // ── Polling: re-read Drive every 60s ──
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (saveTimeoutRef.current) return;
+      const remote = await fetchFromDrive();
+      if (!remote) return;
+      const remoteVer = remote._version || 0;
+      if (remoteVer > driveVersionRef.current) {
+        driveVersionRef.current = remoteVer;
+        snapshotRef.current = JSON.parse(JSON.stringify(remote));
+        setData(remote);
+        try { localStorage.setItem("openmove_crm_local", JSON.stringify(remote)); } catch {}
+        setSyncStatus("refreshed");
+        setTimeout(() => setSyncStatus("idle"), 2500);
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   const addAccount = (form) => {
     const a = { ...form, id: uid(), contacts: [], opportunities: [], activities: [], createdAt: new Date().toISOString().slice(0, 10) };
-    setData((d) => ({ ...d, accounts: [...d.accounts, a] }));
+    saveData({ ...data, accounts: [...data.accounts, a] });
     setSelectedId(a.id);
     setView("detail");
   };
 
   const setViewAndClear = (v) => { if (v !== "detail") setSelectedId(null); setView(v); };
+
+  // Wrapper: intercepts functional setData calls from child components and routes through saveData
+  const setDataAndSave = (updater) => {
+    setData((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      // debounce save
+      try { localStorage.setItem("openmove_crm_local", JSON.stringify(next)); } catch {}
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      setSyncStatus("saving");
+      saveTimeoutRef.current = setTimeout(async () => {
+        saveTimeoutRef.current = null;
+        try {
+          const remote = await fetchFromDrive();
+          const remoteVer = remote?._version || 0;
+          if (remote && driveVersionRef.current > 0 && remoteVer > driveVersionRef.current) {
+            const changes = summarizeChanges(snapshotRef.current, next);
+            setConflictChanges(changes);
+            setConflictWarning(true);
+            setSyncStatus("conflict");
+            driveVersionRef.current = remoteVer;
+            snapshotRef.current = JSON.parse(JSON.stringify(remote));
+            setData(remote);
+            try { localStorage.setItem("openmove_crm_local", JSON.stringify(remote)); } catch {}
+            return;
+          }
+          const newVersion = Math.max(driveVersionRef.current, remoteVer) + 1;
+          driveVersionRef.current = newVersion;
+          snapshotRef.current = JSON.parse(JSON.stringify(next));
+          const payload = { ...next, _version: newVersion, _lastSaved: new Date().toISOString() };
+          await fetch(`${DRIVE_URL}?token=${DRIVE_TOKEN}`, {
+            method: "POST", mode: "no-cors",
+            headers: { "Content-Type": "text/plain" },
+            body: JSON.stringify(payload),
+          });
+          setSyncStatus("saved");
+          setTimeout(() => setSyncStatus("idle"), 2500);
+        } catch { setSyncStatus("error"); }
+      }, 1200);
+      return next;
+    });
+  };
 
   const handleExport = () => {
     const json = JSON.stringify(data, null, 2);
@@ -1698,13 +1721,13 @@ function OpenMoveCRM() {
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {view === "dashboard" && <Dashboard data={data} setView={setView} setSelectedId={setSelectedId} />}
         {view === "pipeline" && <PipelineView data={data} setData={setData} setView={setView} setSelectedId={setSelectedId} />}
-        {view === "accounts" && <AccountList data={data} setData={setData} setView={setView} setSelectedId={setSelectedId} onNew={() => setShowNewAccount(true)} />}
+        {view === "accounts" && <AccountList data={data} setData={setDataAndSave} setView={setView} setSelectedId={setSelectedId} onNew={() => setShowNewAccount(true)} />}
         {view === "detail" && selectedId && (
-          <AccountDetail key={selectedId} accountId={selectedId} data={data} setData={setData} goBack={() => setView("accounts")}
+          <AccountDetail key={selectedId} accountId={selectedId} data={data} setData={setDataAndSave} goBack={() => setView("accounts")}
             onDelete={() => { setData((d) => ({ ...d, accounts: d.accounts.filter((a) => a.id !== selectedId) })); setView("accounts"); }} />
         )}
       </div>
-      {showAI && <AIChatPanel data={data} setData={setData} setView={setView} setSelectedId={setSelectedId} onClose={() => setShowAI(false)} />}
+      {showAI && <AIChatPanel data={data} setData={setDataAndSave} setView={setView} setSelectedId={setSelectedId} onClose={() => setShowAI(false)} />}
       {conflictWarning && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex",
           alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
