@@ -46,7 +46,9 @@ const ACTIVITY_TYPES = ["Email", "Chiamata", "Riunione", "Demo", "Proposta", "No
 const ACTIVITY_ICON = { Email: "✉", Chiamata: "☏", Riunione: "◉", Demo: "▶", Proposta: "◆", "Nota interna": "✎" };
 const REGIONS = ["Abruzzo","Basilicata","Calabria","Campania","Emilia-Romagna","Friuli-Venezia Giulia","Lazio","Liguria","Lombardia","Marche","Molise","Piemonte","Puglia","Sardegna","Sicilia","Toscana","Trentino-Alto Adige","Umbria","Valle d'Aosta","Veneto","Altro"];
 
-const INIT = { accounts: [], _version: 1, _lastSaved: null };
+const INIT = { accounts: [], _version: 1, _lastSaved: null, users: [
+  { id: "u1", nome: "Maurizio", cognome: "", email: "maurizio@openmove.it", password: "OMsell4U" }
+] };
 
 const DRIVE_URL = "https://script.google.com/macros/s/AKfycbyclBjURR1GXPhrRtswuyqtrnfGUioAoKxqAt6OI9HCtSoLBkjqyg4lnEeIFR3w2PdE/exec";
 const DRIVE_TOKEN = "igdpiugxiusg232GJGS2JG2S82jgsj2";
@@ -492,7 +494,7 @@ function LogActivityModal({ onSave, onClose }) {
 }
 
 // ─── TOP NAV ─────────────────────────────────────────────────────────────────
-function Sidebar({ view, setView, data, onExport, onImport, onAI, showAI, syncStatus, onRefresh }) {
+function Sidebar({ view, setView, data, onExport, onImport, onAI, showAI, syncStatus, onRefresh, currentUser, onLogout }) {
   const pipeline = data.accounts.reduce((acc, a) =>
     acc + a.opportunities.filter((o) => !["won", "lost"].includes(o.stage)).reduce((s, o) => s + (o.value || 0), 0), 0);
   const navItems = [
@@ -509,7 +511,7 @@ function Sidebar({ view, setView, data, onExport, onImport, onAI, showAI, syncSt
         <div style={{ width: 24, height: 24, borderRadius: 6, background: T.accent + "33",
           border: `1.5px solid ${T.accent}66`, display: "flex", alignItems: "center",
           justifyContent: "center", fontSize: 12, color: T.accent, fontWeight: 800 }}>O</div>
-        <div style={{ fontSize: 13, fontWeight: 800, color: T.text, letterSpacing: "-0.3px" }}>OpenMove</div>
+        <div style={{ fontSize: 13, fontWeight: 800, color: T.text, letterSpacing: "-0.3px" }}>OpenMove CRM</div>
       </div>
       {/* Nav */}
       <nav style={{ display: "flex", alignItems: "center", height: "100%", padding: "0 6px", flexShrink: 0 }}>
@@ -570,13 +572,18 @@ function Sidebar({ view, setView, data, onExport, onImport, onAI, showAI, syncSt
         </button>
       </div>
       {/* User */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, cursor: "pointer" }}
+        onClick={onLogout} title="Esci">
         <div style={{ width: 26, height: 26, borderRadius: "50%", background: T.accent + "33",
           border: `1.5px solid ${T.accent}55`, display: "flex", alignItems: "center",
-          justifyContent: "center", fontSize: 10, fontWeight: 700, color: T.accent }}>M</div>
+          justifyContent: "center", fontSize: 10, fontWeight: 700, color: T.accent }}>
+          {currentUser ? ((currentUser.nome||"?")[0] + (currentUser.cognome||"?")[0]).toUpperCase() : "?"}
+        </div>
         <div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: T.text, lineHeight: 1.2 }}>Maurizio</div>
-          <div style={{ fontSize: 9, color: T.muted }}>Head of Mobility CC</div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: T.text, lineHeight: 1.2 }}>
+            {currentUser ? `${currentUser.nome} ${currentUser.cognome}`.trim() : ""}
+          </div>
+          <div style={{ fontSize: 9, color: T.muted }}>Clicca per uscire</div>
         </div>
       </div>
     </div>
@@ -899,7 +906,7 @@ function AccountList({ data, setData, setView, setSelectedId, onNew }) {
                   <td style={{ padding: "11px 14px" }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{a.name}</div>
                     <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>
-                      {a.opportunities.length} opp. · {a.contacts.length} contatti · {a.activities.length} attività
+                      {a.opportunities.length} opportunità · {a.contacts.length} contatti · {a.activities.length} attività
                     </div>
                   </td>
                   <td style={{ padding: "11px 14px", fontSize: 12, color: T.muted }}>{a.type}</td>
@@ -1468,16 +1475,18 @@ function AIChatPanel({ data, setData, setView, setSelectedId, onClose }) {
 
 
 // ─── AUTH ────────────────────────────────────────────────────────────────────
-const ACCESS_PASSWORD = "OMsell4U";
+// Auth is now per-user (see users array in data)
 
-function LoginScreen({ onLogin }) {
+function LoginScreen({ users, onLogin }) {
+  const [email, setEmail] = useState("");
   const [pwd, setPwd] = useState("");
   const [error, setError] = useState(false);
 
   const attempt = () => {
-    if (pwd === ACCESS_PASSWORD) {
-      localStorage.setItem("openmove_auth", "1");
-      onLogin();
+    const user = (users || []).find(u => u.email === email.trim() && u.password === pwd);
+    if (user) {
+      localStorage.setItem("openmove_user", JSON.stringify({ id: user.id, nome: user.nome, cognome: user.cognome, email: user.email }));
+      onLogin(user);
     } else {
       setError(true);
       setTimeout(() => setError(false), 2000);
@@ -1494,24 +1503,25 @@ function LoginScreen({ onLogin }) {
           justifyContent: "center", fontSize: 22, color: "#2172f5", fontWeight: 800,
           margin: "0 auto 20px" }}>O</div>
         <div style={{ fontSize: 20, fontWeight: 800, color: "#e2e8f0", marginBottom: 6 }}>OpenMove CRM</div>
-        <div style={{ fontSize: 13, color: "#7090b0", marginBottom: 28 }}>Inserisci la password per accedere</div>
-        <input
-          type="password"
-          placeholder="Password"
-          value={pwd}
+        <div style={{ fontSize: 13, color: "#7090b0", marginBottom: 28 }}>Accedi con le tue credenziali</div>
+        <input type="email" placeholder="Email" value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && attempt()}
+          style={{ width: "100%", background: "#07111f", border: `1px solid ${error ? "#f87171" : "#1e3a60"}`,
+            borderRadius: 8, color: "#e2e8f0", padding: "10px 14px", fontSize: 14,
+            boxSizing: "border-box", outline: "none", marginBottom: 10 }} />
+        <input type="password" placeholder="Password" value={pwd}
           onChange={(e) => setPwd(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && attempt()}
           style={{ width: "100%", background: "#07111f", border: `1px solid ${error ? "#f87171" : "#1e3a60"}`,
             borderRadius: 8, color: "#e2e8f0", padding: "10px 14px", fontSize: 14,
-            boxSizing: "border-box", outline: "none", marginBottom: 12, textAlign: "center" }}
-        />
-        {error && <div style={{ fontSize: 12, color: "#f87171", marginBottom: 10 }}>Password errata</div>}
+            boxSizing: "border-box", outline: "none", marginBottom: 12 }} />
+        {error && <div style={{ fontSize: 12, color: "#f87171", marginBottom: 10 }}>Credenziali non valide</div>}
         <button onClick={attempt}
           style={{ width: "100%", background: "#2172f5", color: "#fff", border: "none",
             borderRadius: 8, padding: "10px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
           Accedi
         </button>
-        <div style={{ fontSize: 11, color: "#7090b044", marginTop: 20 }}>Intellera · Accenture Group</div>
       </div>
     </div>
   );
@@ -1585,6 +1595,111 @@ function summarizeChanges(before, after) {
   }
 
   return changes.slice(0, 10); // cap at 10
+}
+
+
+// ─── USER MANAGEMENT ─────────────────────────────────────────────────────────
+function UserManagement({ data, setData }) {
+  const [showNew, setShowNew] = useState(false);
+  const [editUser, setEditUser] = useState(null);
+  const [deleteUserId, setDeleteUserId] = useState(null);
+  const users = data.users || [];
+
+  const saveUser = (f, id) => {
+    if (id) {
+      setData(d => ({ ...d, users: (d.users||[]).map(u => u.id !== id ? u : { ...u, ...f }) }));
+    } else {
+      setData(d => ({ ...d, users: [...(d.users||[]), { ...f, id: uid() }] }));
+    }
+  };
+
+  return (
+    <div style={{ padding: 28, overflowY: "auto", height: "100%", boxSizing: "border-box" }}>
+      {(showNew || editUser) && (
+        <UserFormModal
+          user={editUser}
+          onSave={(f) => { saveUser(f, editUser?.id); setShowNew(false); setEditUser(null); }}
+          onClose={() => { setShowNew(false); setEditUser(null); }}
+        />
+      )}
+      {deleteUserId && (
+        <ConfirmPopin
+          message={`Eliminare l'utente "${users.find(u=>u.id===deleteUserId)?.nome} ${users.find(u=>u.id===deleteUserId)?.cognome}"?`}
+          onConfirm={() => { setData(d => ({ ...d, users: (d.users||[]).filter(u => u.id !== deleteUserId) })); setDeleteUserId(null); }}
+          onCancel={() => setDeleteUserId(null)}
+        />
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+        <div>
+          <h1 style={{ color: T.text, fontSize: 20, fontWeight: 800, margin: 0 }}>Utenti</h1>
+          <div style={{ color: T.muted, fontSize: 13, marginTop: 4 }}>{users.length} utenti registrati</div>
+        </div>
+        <button style={IS.btnPrimary} onClick={() => setShowNew(true)}>+ Nuovo Utente</button>
+      </div>
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: T.surface2 }}>
+              {["Utente", "Email", "Password", ""].map(h => (
+                <th key={h} style={{ padding: "11px 14px", textAlign: "left", fontSize: 11, color: T.muted,
+                  fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {users.map(u => (
+              <tr key={u.id} style={{ borderTop: `1px solid ${T.border}` }}>
+                <td style={{ padding: "11px 14px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 32, height: 32, borderRadius: "50%", background: T.accent + "33",
+                      border: `1.5px solid ${T.accent}55`, display: "flex", alignItems: "center",
+                      justifyContent: "center", fontSize: 11, fontWeight: 700, color: T.accent, flexShrink: 0 }}>
+                      {((u.nome||"?")[0] + (u.cognome||"?")[0]).toUpperCase()}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{u.nome} {u.cognome}</div>
+                    </div>
+                  </div>
+                </td>
+                <td style={{ padding: "11px 14px", fontSize: 12, color: T.muted }}>{u.email}</td>
+                <td style={{ padding: "11px 14px", fontSize: 12, color: T.muted, letterSpacing: "0.15em" }}>{"•".repeat(Math.min(u.password?.length||0, 10))}</td>
+                <td style={{ padding: "8px 14px" }}>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => setEditUser(u)}
+                      style={{ ...IS.btnSecondary, padding: "4px 10px", fontSize: 11 }}>✎ Modifica</button>
+                    <button onClick={() => setDeleteUserId(u.id)}
+                      style={{ background: "none", border: "none", color: "#f8717166", cursor: "pointer", fontSize: 16 }}>×</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {users.length === 0 && (
+          <div style={{ padding: 32, textAlign: "center", color: T.muted, fontSize: 14 }}>Nessun utente.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function UserFormModal({ user, onSave, onClose }) {
+  const [f, setF] = useState({ nome: user?.nome||"", cognome: user?.cognome||"", email: user?.email||"", password: user?.password||"" });
+  const s = (k, v) => setF(p => ({ ...p, [k]: v }));
+  return (
+    <Modal title={user ? "Modifica Utente" : "Nuovo Utente"} onClose={onClose}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+        <Field label="Nome" half><input style={IS.input} value={f.nome} onChange={e => s("nome", e.target.value)} /></Field>
+        <Field label="Cognome" half><input style={IS.input} value={f.cognome} onChange={e => s("cognome", e.target.value)} /></Field>
+      </div>
+      <Field label="Email"><input type="email" style={IS.input} value={f.email} onChange={e => s("email", e.target.value)} /></Field>
+      <Field label="Password"><input type="text" style={IS.input} value={f.password} onChange={e => s("password", e.target.value)} /></Field>
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
+        <button style={IS.btnSecondary} onClick={onClose}>Annulla</button>
+        <button style={IS.btnPrimary} onClick={() => { if (f.nome && f.email && f.password) { onSave(f); onClose(); } }}>Salva</button>
+      </div>
+    </Modal>
+  );
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
@@ -1808,8 +1923,12 @@ function OpenMoveCRM() {
     reader.readAsText(file);
   };
 
-  const [authed, setAuthed] = useState(() => localStorage.getItem("openmove_auth") === "1");
-  if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />;
+  const [currentUser, setCurrentUser] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("openmove_user")); } catch { return null; }
+  });
+  if (!currentUser) return loading 
+    ? <div style={{height:'100vh',background:'#07111f',display:'flex',alignItems:'center',justifyContent:'center'}}><div style={{color:'#2172f5',fontFamily:'Outfit,sans-serif',fontSize:14}}>Caricamento…</div></div>
+    : <LoginScreen users={data ? (data.users || []) : []} onLogin={(u) => setCurrentUser(u)} />;
   if (loading) {
     return (
       <div style={{ background: T.bg, height: "100vh", display: "flex", alignItems: "center",
@@ -1843,10 +1962,11 @@ function OpenMoveCRM() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: T.bg, fontFamily: "Outfit, sans-serif", overflow: "hidden", fontSize: 14 }}>
       {showNewAccount && <NewAccountModal onSave={addAccount} onClose={() => setShowNewAccount(false)} />}
-      <Sidebar view={view} setView={setViewAndClear} data={data} onExport={handleExport} onImport={handleImport} onAI={() => setShowAI((v) => !v)} showAI={showAI} syncStatus={syncStatus} onRefresh={handleRefresh} />
+      <Sidebar view={view} setView={setViewAndClear} data={data} onExport={handleExport} onImport={handleImport} onAI={() => setShowAI((v) => !v)} showAI={showAI} syncStatus={syncStatus} onRefresh={handleRefresh} currentUser={currentUser} onLogout={() => { localStorage.removeItem('openmove_user'); setCurrentUser(null); }} />
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {view === "dashboard" && <Dashboard data={data} setView={setView} setSelectedId={setSelectedId} />}
         {view === "pipeline" && <PipelineView data={data} setData={setData} setView={setView} setSelectedId={setSelectedId} />}
+        {view === "users" && <UserManagement data={data} setData={setDataAndSave} />}
         {view === "accounts" && <AccountList data={data} setData={setDataAndSave} setView={setView} setSelectedId={setSelectedId} onNew={() => setShowNewAccount(true)} />}
         {view === "detail" && selectedId && (
           <AccountDetail key={selectedId} accountId={selectedId} data={data} setData={setDataAndSave} goBack={() => setView("accounts")}
