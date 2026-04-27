@@ -47,7 +47,7 @@ const ACTIVITY_ICON = { Email: "✉", Chiamata: "☏", Riunione: "◉", Demo: "�
 const REGIONS = ["Abruzzo","Basilicata","Calabria","Campania","Emilia-Romagna","Friuli-Venezia Giulia","Lazio","Liguria","Lombardia","Marche","Molise","Piemonte","Puglia","Sardegna","Sicilia","Toscana","Trentino-Alto Adige","Umbria","Valle d'Aosta","Veneto","Altro"];
 
 const INIT = { accounts: [], _version: 1, _lastSaved: null, users: [
-  { id: "u1", nome: "Maurizio", cognome: "", email: "maurizio@openmove.it", password: "OMsell4U" }
+  { id: "u1", nome: "Maurizio", cognome: "Veronese", email: "maurizio.veronese@e.openmove.com", password: "OMsell4U" }
 ] };
 
 const DRIVE_URL = "https://script.google.com/macros/s/AKfycbyclBjURR1GXPhrRtswuyqtrnfGUioAoKxqAt6OI9HCtSoLBkjqyg4lnEeIFR3w2PdE/exec";
@@ -1727,13 +1727,19 @@ function OpenMoveCRM() {
       try {
         const remote = await fetchFromDrive();
         if (remote && Array.isArray(remote.accounts)) {
-          driveVersionRef.current = remote._version || 1;
-          snapshotRef.current = JSON.parse(JSON.stringify(remote));
-          setData(remote);
-          try { localStorage.setItem("openmove_crm_local", JSON.stringify(remote)); } catch {}
+          // Migrate: ensure correct default user exists
+          let users = remote.users || [];
+          const hasCorrect = users.some(u => u.email === "maurizio.veronese@e.openmove.com");
+          if (!hasCorrect) {
+            users = users.filter(u => u.email !== "maurizio@openmove.it");
+            users = [{ id: "u1", nome: "Maurizio", cognome: "Veronese", email: "maurizio.veronese@e.openmove.com", password: "OMsell4U" }, ...users];
+          }
+          const migrated = { ...remote, users };
+          driveVersionRef.current = migrated._version || 1;
+          snapshotRef.current = JSON.parse(JSON.stringify(migrated));
+          setData(migrated);
+          try { localStorage.setItem("openmove_crm_local", JSON.stringify(migrated)); } catch {}
         } else {
-          // Drive unreachable or empty: use local as baseline, version stays 0
-          // setDataAndSave will force-save on first user action
           driveVersionRef.current = 0;
           snapshotRef.current = null;
         }
