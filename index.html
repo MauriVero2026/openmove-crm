@@ -492,7 +492,7 @@ function LogActivityModal({ onSave, onClose }) {
 }
 
 // ─── TOP NAV ─────────────────────────────────────────────────────────────────
-function Sidebar({ view, setView, data, onExport, onImport, onAI, showAI, syncStatus }) {
+function Sidebar({ view, setView, data, onExport, onImport, onAI, showAI, syncStatus, onRefresh }) {
   const pipeline = data.accounts.reduce((acc, a) =>
     acc + a.opportunities.filter((o) => !["won", "lost"].includes(o.stage)).reduce((s, o) => s + (o.value || 0), 0), 0);
   const navItems = [
@@ -555,6 +555,7 @@ function Sidebar({ view, setView, data, onExport, onImport, onAI, showAI, syncSt
       </div>
       {/* Export / Import / AI */}
       <div style={{ display: "flex", gap: 3, marginRight: 8, flexShrink: 0 }}>
+        <button style={{ ...IS.btnSecondary, padding: "3px 7px", fontSize: 10 }} onClick={onRefresh} title="Ricarica da Drive">↺</button>
         <button style={{ ...IS.btnSecondary, padding: "3px 7px", fontSize: 10 }} onClick={onExport}>↓ Esporta</button>
         <label style={{ ...IS.btnSecondary, padding: "3px 7px", fontSize: 10, cursor: "pointer", display: "inline-flex", alignItems: "center" }}>
           ↑ Importa
@@ -782,11 +783,41 @@ function PipelineView({ data, setData, setView, setSelectedId }) {
 }
 
 // ─── ACCOUNT LIST ─────────────────────────────────────────────────────────────
+
+// ─── CONFIRM POPIN ───────────────────────────────────────────────────────────
+function ConfirmPopin({ message, onConfirm, onCancel }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
+      <div style={{ background: "#0d1e38", border: "1px solid #f8717166", borderRadius: 12,
+        padding: "24px 28px", maxWidth: 360, width: "90%", textAlign: "center" }}>
+        <div style={{ fontSize: 13, color: "#e2e8f0", lineHeight: 1.6, marginBottom: 20 }}>{message}</div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+          <button onClick={onCancel}
+            style={{ ...IS.btnSecondary, padding: "8px 20px", fontSize: 13 }}>Annulla</button>
+          <button onClick={onConfirm}
+            style={{ ...IS.btnPrimary, padding: "8px 20px", fontSize: 13,
+              background: "#ef4444", border: "none" }}>Elimina</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AccountList({ data, setData, setView, setSelectedId, onNew }) {
   const [search, setSearch] = useState("");
   const [fType, setFType] = useState("");
-
   const [fPri, setFPri] = useState("");
+  const [sortCol, setSortCol] = useState("name");
+  const [sortDir, setSortDir] = useState("asc");
+  const [deleteId, setDeleteId] = useState(null);
+
+  const toggleSort = (col) => {
+    if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortCol(col); setSortDir("asc"); }
+  };
+
+  const sortArrow = (col) => sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
   const filtered = data.accounts.filter((a) => {
     const q = search.toLowerCase();
@@ -794,6 +825,20 @@ function AccountList({ data, setData, setView, setSelectedId, onNew }) {
     if (fType && a.type !== fType) return false;
     if (fPri && a.priority !== fPri) return false;
     return true;
+  }).sort((a, b) => {
+    let va, vb;
+    if (sortCol === "name")     { va = a.name; vb = b.name; }
+    else if (sortCol === "type")     { va = a.type; vb = b.type; }
+    else if (sortCol === "region")   { va = a.region; vb = b.region; }
+    else if (sortCol === "priority") { va = PRIORITIES.indexOf(a.priority); vb = PRIORITIES.indexOf(b.priority); }
+    else if (sortCol === "opps")     { va = a.opportunities.length; vb = b.opportunities.length; }
+    else if (sortCol === "pipeline") {
+      va = a.opportunities.filter(o=>!["won","lost"].includes(o.stage)).reduce((s,o)=>s+(o.value||0),0);
+      vb = b.opportunities.filter(o=>!["won","lost"].includes(o.stage)).reduce((s,o)=>s+(o.value||0),0);
+    }
+    if (va < vb) return sortDir === "asc" ? -1 : 1;
+    if (va > vb) return sortDir === "asc" ? 1 : -1;
+    return 0;
   });
 
   return (
@@ -823,9 +868,23 @@ function AccountList({ data, setData, setView, setSelectedId, onNew }) {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ background: T.surface2 }}>
-              {["Prospect", "Tipo", "Regione", "Priorità", "Opp.", "Pipeline", ""].map((h) => (
-                <th key={h} style={{ padding: "11px 14px", textAlign: "left", fontSize: 11, color: T.muted,
-                  fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap" }}>{h}</th>
+              {[
+                { label: "Prospect", col: "name" },
+                { label: "Tipo", col: "type" },
+                { label: "Regione", col: "region" },
+                { label: "Priorità", col: "priority" },
+                { label: "Opp.", col: "opps" },
+                { label: "Pipeline", col: "pipeline" },
+                { label: "", col: null },
+              ].map(({ label, col }) => (
+                <th key={label} onClick={col ? () => toggleSort(col) : undefined}
+                  style={{ padding: "11px 14px", textAlign: "left", fontSize: 11,
+                    color: sortCol === col ? T.accent : T.muted,
+                    fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em",
+                    whiteSpace: "nowrap", cursor: col ? "pointer" : "default",
+                    userSelect: "none" }}>
+                  {label}{col ? sortArrow(col) : ""}
+                </th>
               ))}
             </tr>
           </thead>
@@ -840,7 +899,7 @@ function AccountList({ data, setData, setView, setSelectedId, onNew }) {
                   <td style={{ padding: "11px 14px" }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{a.name}</div>
                     <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>
-                      {a.contacts.length} contatti · {a.activities.length} attività
+                      {a.opportunities.length} opp. · {a.contacts.length} contatti · {a.activities.length} attività
                     </div>
                   </td>
                   <td style={{ padding: "11px 14px", fontSize: 12, color: T.muted }}>{a.type}</td>
@@ -854,10 +913,7 @@ function AccountList({ data, setData, setView, setSelectedId, onNew }) {
                   </td>
                   <td style={{ padding: "11px 14px", color: T.muted, fontSize: 16 }}>›</td>
                   <td style={{ padding: "8px 10px" }} onClick={(e) => e.stopPropagation()}>
-                    <button onClick={(e) => {
-                        e.stopPropagation();
-                        setData((d) => ({ ...d, accounts: d.accounts.filter((x) => x.id !== a.id) }));
-                      }}
+                    <button onClick={(e) => { e.stopPropagation(); setDeleteId(a.id); }}
                       style={{ background: "none", border: "none", color: "#f8717166", cursor: "pointer",
                         fontSize: 16, padding: "4px 6px", borderRadius: 6 }}
                       title="Elimina prospect">×</button>
@@ -873,6 +929,13 @@ function AccountList({ data, setData, setView, setSelectedId, onNew }) {
           </div>
         )}
       </div>
+      {deleteId && (
+        <ConfirmPopin
+          message={`Eliminare il prospect "${data.accounts.find(a=>a.id===deleteId)?.name}"? L'operazione è irreversibile.`}
+          onConfirm={() => { setData((d) => ({ ...d, accounts: d.accounts.filter((x) => x.id !== deleteId) })); setDeleteId(null); }}
+          onCancel={() => setDeleteId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -887,6 +950,7 @@ function AccountDetail({ accountId, data, setData, goBack, onDelete }) {
   const [notes, setNotes] = useState("");
   const [editDate, setEditDate] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null); // {type, id, label}
   const [editingOpp, setEditingOpp] = useState(null);
   const [editingContact, setEditingContact] = useState(null);
   const [editingActivity, setEditingActivity] = useState(null);
@@ -908,6 +972,18 @@ function AccountDetail({ accountId, data, setData, goBack, onDelete }) {
       {editingOpp && <EditOppModal opp={editingOpp} onSave={(updated) => { update((a) => ({ ...a, opportunities: a.opportunities.map((op) => op.id !== editingOpp.id ? op : { ...op, ...updated }) })); setEditingOpp(null); }} onClose={() => setEditingOpp(null)} />}
       {editingContact && <EditContactModal contact={editingContact} onSave={(updated) => { update((a) => ({ ...a, contacts: a.contacts.map((ct) => ct.id !== editingContact.id ? ct : { ...ct, ...updated }) })); setEditingContact(null); }} onClose={() => setEditingContact(null)} />}
       {showEditAccount && <EditAccountModal account={acc} onSave={(updated) => { update((a) => ({ ...a, ...updated })); setShowEditAccount(false); }} onClose={() => setShowEditAccount(false)} />}
+      {deleteTarget && (
+        <ConfirmPopin
+          message={`Eliminare ${deleteTarget.label}? L'operazione è irreversibile.`}
+          onConfirm={() => {
+            if (deleteTarget.type === "opp") update((a) => ({ ...a, opportunities: a.opportunities.filter((op) => op.id !== deleteTarget.id) }));
+            if (deleteTarget.type === "contact") update((a) => ({ ...a, contacts: a.contacts.filter((ct) => ct.id !== deleteTarget.id) }));
+            if (deleteTarget.type === "activity") update((acc) => ({ ...acc, activities: acc.activities.filter((x) => x.id !== deleteTarget.id) }));
+            setDeleteTarget(null);
+          }}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
       {editingActivity && <EditActivityModal activity={editingActivity} onSave={(updated) => { update((a) => ({ ...a, activities: a.activities.map((ac) => ac.id !== editingActivity.id ? ac : { ...ac, ...updated }) })); setEditingActivity(null); }} onClose={() => setEditingActivity(null)} />}
 
       {/* Header */}
@@ -1055,7 +1131,7 @@ function AccountDetail({ accountId, data, setData, goBack, onDelete }) {
                       <button onClick={() => setEditingOpp(o)}
                         style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 13, padding: "2px 6px",
                           borderRadius: 6, border: `1px solid ${T.border}` }} title="Modifica">✎</button>
-                      <button onClick={() => update((a) => ({ ...a, opportunities: a.opportunities.filter((op) => op.id !== o.id) }))}
+                      <button onClick={() => setDeleteTarget({ type: "opp", id: o.id, label: `l'opportunità "${o.title || o.product}"` })}
                         style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 16, padding: "0 4px" }}>×</button>
                     </div>
                   </div>
@@ -1110,7 +1186,7 @@ function AccountDetail({ accountId, data, setData, goBack, onDelete }) {
                       <button onClick={() => setEditingContact(c)}
                         style={{ background: "none", border: `1px solid ${T.border}`, color: T.muted,
                           cursor: "pointer", fontSize: 12, padding: "2px 7px", borderRadius: 6 }}>✎</button>
-                      <button onClick={() => update((a) => ({ ...a, contacts: a.contacts.filter((ct) => ct.id !== c.id) }))}
+                      <button onClick={() => setDeleteTarget({ type: "contact", id: c.id, label: `il contatto "${c.name}"` })}
                         style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 16 }}>×</button>
                     </div>
                   </div>
@@ -1167,7 +1243,7 @@ function AccountDetail({ accountId, data, setData, goBack, onDelete }) {
                         <button onClick={() => setEditingActivity(a)}
                           style={{ background: "none", border: `1px solid ${T.border}`, color: T.muted,
                             cursor: "pointer", fontSize: 11, padding: "2px 7px", borderRadius: 6 }}>✎</button>
-                        <button onClick={() => update((acc) => ({ ...acc, activities: acc.activities.filter((x) => x.id !== a.id) }))}
+                        <button onClick={() => setDeleteTarget({ type: "activity", id: a.id, label: `l'attività "${a.type}" del ${fmtDate(a.date)}` })}
                           style={{ background: "none", border: "none", color: "#f8717188", cursor: "pointer",
                             fontSize: 15, lineHeight: 1, padding: "0 2px" }}
                           title="Elimina attività">×</button>
@@ -1686,6 +1762,21 @@ function OpenMoveCRM() {
     });
   };
 
+  const handleRefresh = async () => {
+    setSyncStatus("saving");
+    try {
+      const remote = await fetchFromDrive();
+      if (remote && Array.isArray(remote.accounts)) {
+        driveVersionRef.current = remote._version || 1;
+        snapshotRef.current = JSON.parse(JSON.stringify(remote));
+        setData(remote);
+        try { localStorage.setItem("openmove_crm_local", JSON.stringify(remote)); } catch {}
+        setSyncStatus("refreshed");
+        setTimeout(() => setSyncStatus("idle"), 2500);
+      }
+    } catch { setSyncStatus("error"); }
+  };
+
   const handleExport = () => {
     const json = JSON.stringify(data, null, 2);
     const b64 = btoa(unescape(encodeURIComponent(json)));
@@ -1752,7 +1843,7 @@ function OpenMoveCRM() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: T.bg, fontFamily: "Outfit, sans-serif", overflow: "hidden", fontSize: 14 }}>
       {showNewAccount && <NewAccountModal onSave={addAccount} onClose={() => setShowNewAccount(false)} />}
-      <Sidebar view={view} setView={setViewAndClear} data={data} onExport={handleExport} onImport={handleImport} onAI={() => setShowAI((v) => !v)} showAI={showAI} syncStatus={syncStatus} />
+      <Sidebar view={view} setView={setViewAndClear} data={data} onExport={handleExport} onImport={handleImport} onAI={() => setShowAI((v) => !v)} showAI={showAI} syncStatus={syncStatus} onRefresh={handleRefresh} />
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {view === "dashboard" && <Dashboard data={data} setView={setView} setSelectedId={setSelectedId} />}
         {view === "pipeline" && <PipelineView data={data} setData={setData} setView={setView} setSelectedId={setSelectedId} />}
