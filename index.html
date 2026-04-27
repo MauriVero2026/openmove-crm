@@ -1532,12 +1532,25 @@ function OpenMoveCRM() {
 
   useEffect(() => {
     const load = async () => {
+      // Fetch from Drive — this is the ONLY source of truth (JSONt0)
       try {
-        const raw = localStorage.getItem("openmove_crm_local");
-        setData(raw ? JSON.parse(raw) : INIT);
+        const remote = await fetchFromDrive();
+        if (remote && Array.isArray(remote.accounts)) {
+          driveVersionRef.current = remote._version || 1;
+          snapshotRef.current = JSON.parse(JSON.stringify(remote));
+          setData(remote);
+          try { localStorage.setItem("openmove_crm_local", JSON.stringify(remote)); } catch {}
+        } else {
+          // Drive unreachable or empty: use local as baseline, version stays 0
+          // setDataAndSave will force-save on first user action
+          driveVersionRef.current = 0;
+          snapshotRef.current = null;
+        }
       } catch {
-        setData(INIT);
+        driveVersionRef.current = 0;
+        snapshotRef.current = null;
       }
+
       setLoading(false);
     };
     load();
@@ -1708,8 +1721,30 @@ function OpenMoveCRM() {
   if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />;
   if (loading) {
     return (
-      <div style={{ background: T.bg, height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Outfit, sans-serif" }}>
-        <div style={{ color: T.accent, fontSize: 15, fontWeight: 600 }}>Caricamento CRM OpenMove...</div>
+      <div style={{ background: T.bg, height: "100vh", display: "flex", alignItems: "center",
+        justifyContent: "center", fontFamily: "Outfit, sans-serif" }}>
+        <div style={{ background: "#0d1e38", border: "1px solid #1e3a60", borderRadius: 14,
+          padding: "36px 44px", textAlign: "center", minWidth: 280 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 11, background: "#2172f522",
+            border: "1.5px solid #2172f566", display: "flex", alignItems: "center",
+            justifyContent: "center", fontSize: 20, color: "#2172f5", fontWeight: 800,
+            margin: "0 auto 18px" }}>O</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#e2e8f0", marginBottom: 10 }}>
+            OpenMove CRM
+          </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#2172f5",
+              animation: "pulse 1.2s ease-in-out infinite" }} />
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#2172f5",
+              animation: "pulse 1.2s ease-in-out 0.4s infinite" }} />
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#2172f5",
+              animation: "pulse 1.2s ease-in-out 0.8s infinite" }} />
+          </div>
+          <div style={{ fontSize: 12, color: "#7090b0", marginTop: 14 }}>
+            Connessione a Google Drive…
+          </div>
+        </div>
+        <style>{`@keyframes pulse { 0%,100%{opacity:.2;transform:scale(.8)} 50%{opacity:1;transform:scale(1)} }`}</style>
       </div>
     );
   }
